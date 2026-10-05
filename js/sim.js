@@ -325,621 +325,441 @@ function drawObstaclesSide(side){
  });
 }
 
-/* ========= Simulation ========= */
-const sim={running:false,paused:false,finished:false,time:0,last:0,len:1,s:0,action:null,carry:null,turnT:0};
+/* ========= Simulation =========
+   s     : position du centre du nageur le long de la longueur (0 → 25 m)
+   depth : profondeur du centre du corps (m, + vers le fond, − hors de l'eau)
+   Toutes les transitions sont continues (pas de téléportation) ;
+   l'inclinaison du corps est déduite de la trajectoire. */
+const sim={running:false,paused:false,finished:false,time:0,last:0,len:1,s:0,action:null,carry:null,turnT:0,
+  depth:0, turn:null, vs:0, vd:0, pitch:0, roll:1, flip:0, stroke:0, kick:0, yM:1.9, yaw:0, mode:'block', _jump:false, _drawT:0};
+
+const SPEED={swim:2.3, under:1.7, tow:1.35, mat:1.0};
+const WALL=POOL_LEN-0.9;        // centre du corps quand la tête/main touche le mur
+const ease=(u)=>{ u=clamp(u,0,1); return u*u*(3-2*u); };
+const lerp=(a,b,u)=>a+(b-a)*u;
+const laneY=(len)=>(len%2===1)?1.9:0.6;
+const HOOP_D=DEPTH-0.42;         // passage au centre du cerceau lesté
+const FLOOR_D=DEPTH-0.22;        // nageur au fond (ramassage)
 
 function initStatuses(){
- for(let i=1;i<=D.nbLongueurs;i++){
-  (D.obstacles[i]||[]).forEach(o=>{ o._done=false; o._taken=false; });
- }
+ for(let i=1;i<=D.nbLongueurs;i++) (D.obstacles[i]||[]).forEach(o=>{ o._done=false; o._taken=false; });
+ Object.assign(sim,{s:-0.55, depth:-0.5, turn:null, vs:0, vd:0, pitch:0.35, roll:1, flip:0, stroke:0, kick:0,
+   yM:laneY(1), yaw:0, mode:'block', _jump:false});
 }
 
+/* profondeur « naturelle » : plongeon au départ, coulée après chaque virage */
+function pushDepth(s, first){
+ if(first){
+  if(s<2.4) return lerp(-0.5, 0.6, ease((s+0.55)/2.95));
+  return 0.6*(1-ease((s-2.4)/4));
+ }
+ return 0.55*(1-ease((s-0.9)/4.5));
+}
+
+function leadFor(o){
+ if(o.type==='cerceau') return 3.0;
+ if(o.type==='objet' || o.type==='mannequin') return 2.6;
+ if(o.type==='tapis') return 1.5+0.5;
+ return 0;
+}
 function obstacleNearCurrent(){
  const list=D.obstacles[sim.len]||[];
  for(const o of list){
   if(o._done) continue;
-  let pos = o.dist; // pos is progress from start wall (0..25)
-  if(o.type==='tapis'){ pos = Math.max(0, o.dist-1.5); }
-  const ahead = pos - sim.s;
-  if(ahead < -0.2){ o._done=true; continue; }
-  if(ahead >= -0.2 && ahead <= 0.35) return o;
+  return (sim.s >= o.dist - leadFor(o) - 1e-3) ? o : null;
  }
  return null;
 }
 
-
-function maxPassedDist(len){
- const list=D.obstacles[len]||[];
- let m=-1;
- for(const o of list){ if(o && (o._done || o._taken)) m=Math.max(m, o.dist); }
- return m;
-}
-
 function beginAction(o){
- const pos=o.dist;
- if(o.type==='apnee'){
-  sim.action={type:'apnee', o, pos, t:0, total:Math.max(1,o.depl)};
- }else if(o.type==='cerceau'){
-  sim.action={type:'cerceau', o, pos, t:0, phase:'down'};
- }else if(o.type==='objet'){
-  sim.action={type:'objet', o, pos, t:0, phase:'down', xPool:getXPool(sim.len,pos)};
- }else if(o.type==='mannequin'){
-  sim.action={type:'mannequin', o, pos, t:0, phase:'down', rem:Math.max(0,o.remorque||0), xPool:getXPool(sim.len,pos)};
- }else if(o.type==='tapis'){
-  const start=Math.max(0, o.dist-1.5);
-  const end=Math.min(POOL_LEN, o.dist+1.5);
-  sim.action={type:'tapis', o, pos:o.dist, t:0, start, end};
+ const a={type:o.type, o, pos:o.dist, t:0, s0:sim.s, d0:sim.depth};
+ if(o.type==='cerceau'){ a.end=Math.min(WALL, Math.max(o.dist+2.6, sim.s+1.2)); }
+ else if(o.type==='apnee'){ a.start=Math.max(o.dist, sim.s); a.end=Math.min(WALL, o.dist+Math.max(1,o.depl||10)); if(a.end<=a.start+0.3){ o._done=true; return; } }
+ else if(o.type==='objet' || o.type==='mannequin'){
+  a.phase='down'; a.target=Math.min(WALL-1, Math.max(o.dist, sim.s+0.6)); a.xPool=getXPool(sim.len, o.dist);
+  a.rem=Math.max(0, o.remorque||0);
  }
+ else if(o.type==='tapis'){ a.start=Math.max(0,o.dist-1.5); a.end=Math.min(POOL_LEN-0.3, o.dist+1.5); if(sim.s>=a.end){ o._done=true; return; } }
+ sim.action=a;
 }
 
-function finishLength(){
- const prevLen=sim.len;
-
- // ne pas "effacer" le mannequin/objet à la bordure : si porté, le lâcher et le laisser retomber
+function endAction(){ if(sim.action){ sim.action.o._done=true; } sim.action=null; }
+function releaseCarry(){
  if(sim.carry && sim.carry.held){
-  sim.carry.held=false;
-  sim.carry.fallT=0;
-  sim.carry.depthM=0.0;
-  sim.carry.anchorX = sim.carry.xPool;
- }
-
- sim.len += 1;
- sim.s = 0;
- sim.action=null;
- sim.turnT=0;
- if(sim.len>D.nbLongueurs){
-  sim.running=false; sim.finished=true;
-  onState();
+  sim.carry.held=false; sim.carry.fallT=0;
+  sim.carry.xPool=getXPool(sim.len, sim.s+0.5); sim.carry.anchorX=sim.carry.xPool;
+  sim.carry.yM=sim.yM; sim.carry.depthM=Math.max(0, sim.depth);
  }
 }
 
-function baseDepthRule(distanceFromStart){
- if(distanceFromStart < 3) return 0.7;
- if(distanceFromStart < 5) return 0.7 * (1 - (distanceFromStart-3)/2);
- return 0.0;
+function stepSwim(dt){
+ const first=(sim.len===1);
+ let v=SPEED.swim + (sim.s<5 ? 0.9*(1-Math.max(0,sim.s)/5) : 0);
+ if(first && sim.s<2.4) v=3.6;
+ sim.s=Math.min(WALL, sim.s+v*dt);
+ const target=pushDepth(sim.s, first);
+ sim.depth = (first && sim.s<2.4) ? target : lerp(sim.depth, target, 1-Math.exp(-dt*7));
+ sim.mode = sim.depth>0.18 ? 'glide' : (sim.depth<-0.1 ? 'dive' : 'crawl');
 }
 
+function stepAction(dt){
+ const a=sim.action; a.t+=dt;
+ if(a.type==='cerceau'){
+  sim.s += SPEED.under*dt;
+  const L=Math.max(0.5, a.end-a.s0), u=clamp((sim.s-a.s0)/L,0,1);
+  const uh=clamp((a.pos-a.s0)/L, 0.3, 0.75);
+  sim.depth = u<uh ? lerp(a.d0, HOOP_D, ease(u/uh)) : lerp(HOOP_D, 0.05, ease((u-uh)/(1-uh)));
+  sim.mode='under';
+  if(u>=1) endAction();
+ }else if(a.type==='apnee'){
+  sim.s += SPEED.under*dt;
+  const L=a.end-a.start, x=sim.s-a.start, r=Math.min(1.6, L/3), deep=1.0;
+  sim.depth = x<r ? lerp(a.d0, deep, ease(x/r)) : (x>L-r ? lerp(deep, 0.05, ease((x-(L-r))/r)) : deep);
+  sim.mode='under';
+  if(sim.s>=a.end){ sim.s=a.end; endAction(); }
+ }else if(a.type==='objet' || a.type==='mannequin'){
+  if(a.phase==='down'){
+   const p=clamp(a.t/1.8,0,1);
+   sim.s=lerp(a.s0, a.target, ease(p)); sim.depth=lerp(a.d0, FLOOR_D, ease(p)); sim.mode='under';
+   if(p>=1){
+    a.phase='grab'; a.t=0; a.o._taken=true;
+    sim.carry={type:a.type, xPool:a.xPool, yM:sim.yM, depthM:DEPTH-0.1, fallT:0, held:true, anchorX:a.xPool};
+   }
+  }else if(a.phase==='grab'){
+   sim.mode='grab';
+   if(a.t>=0.4){ a.phase='up'; a.t=0; }
+  }else if(a.phase==='up'){
+   const p=clamp(a.t/1.8,0,1);
+   sim.s=lerp(a.target, a.target+1.8, ease(p)); sim.depth=lerp(FLOOR_D, a.type==='mannequin'?0.08:0.0, ease(p)); sim.mode='carryUp';
+   if(p>=1){ a.phase = (a.type==='objet') ? 'hold' : 'tow'; a.t=0; a.towFrom=sim.s; }
+  }else if(a.phase==='hold'){
+   sim.s=Math.min(WALL, sim.s+0.4*dt); sim.mode='hold';
+   if(a.t>=0.9){ releaseCarry(); endAction(); }
+  }else if(a.phase==='tow'){
+   sim.s=Math.min(WALL, sim.s+SPEED.tow*dt); sim.depth=lerp(sim.depth,0.08,1-Math.exp(-dt*5)); sim.mode='tow';
+   if(sim.s - a.towFrom >= Math.max(0.5, a.rem - (a.towFrom-a.pos)) || sim.s>=WALL){ releaseCarry(); endAction(); }
+  }
+  if(sim.carry && sim.carry.held){ sim.carry.xPool=getXPool(sim.len, sim.s); sim.carry.depthM=sim.depth; sim.carry.yM=sim.yM; }
+ }else if(a.type==='tapis'){
+  if(sim.s < a.start){ stepSwim(dt); return; }
+  sim.s += SPEED.mat*dt;
+  const x=sim.s-a.start;
+  sim.depth = lerp(sim.depth, -0.2, 1-Math.exp(-dt*9)); sim.mode = x<0.4 ? 'climb' : 'mat';
+  if(sim.s>=a.end){ endAction(); }
+ }
+}
+
+function startTurn(){
+ if(sim.len>=D.nbLongueurs){ // arrivée : touche du mur
+  sim.s=WALL; sim.running=false; sim.finished=true; sim.mode='crawl'; return;
+ }
+ sim.turn={t:0, dur:0.9, s0:sim.s, d0:sim.depth};
+}
+function stepTurn(dt){
+ const T=sim.turn; T.t+=dt;
+ const u=clamp(T.t/T.dur,0,1);
+ sim.s=lerp(T.s0, WALL+0.2, ease(u)); sim.depth=lerp(T.d0, 0.45, ease(u));
+ sim.flip=ease(u); sim.mode='turn';
+ if(u>=1){
+  sim.turn=null; sim.flip=0; sim.len++; sim.s=0.9; sim.roll=-1; sim.pitch=0; sim._jump=true; sim.mode='glide';
+ }
+}
 
 function swimmerState(dt){
- const v=2.5;
- if(sim.action){
-  const a=sim.action;
-  a.t += dt;
+ const s0=sim.s, d0=sim.depth;
+ if(sim.turn) stepTurn(dt);
+ else if(sim.action) stepAction(dt);
+ else stepSwim(dt);
 
-  if(a.type==='apnee'){
-   const seg=a.total;
-   const segV=2.0;
-   sim.s += Math.min(v, segV) * dt;
-   const start=a.pos, end=a.pos + seg;
-   if(sim.s < start) sim.s = start;
-   if(sim.s > end) sim.s = end;
-   if(sim.s >= end-0.01){ a.o._done=true; sim.action=null; }
-  }else if(a.type==='tapis'){
-   const crawlV=1.2;
-   if(sim.s < a.start) sim.s = a.start;
-   sim.s += crawlV*dt;
-   if(sim.s > a.end) sim.s = a.end;
-   if(sim.s >= a.end-0.01){ a.o._done=true; sim.action=null; }
-  }else{
-   // lock x at obstacle during vertical work / pickup (no teleport)
-   if(!(a.type==='mannequin' && a.phase==='tow')){
-    const p=Math.min(1, a.t/1.0);
-    let off=0;
-    if(a.phase==='down') off = -0.45*(1-p);
-    else if(a.phase==='up') off = 0.15*p;
-    sim.s = a.pos + off;
-   }
-
-   if(a.type==='cerceau'){
-    if(a.phase==='down' && a.t>=1){ a.phase='up'; a.t=0; }
-    else if(a.phase==='up' && a.t>=1){ a.o._done=true; sim.action=null; }
-   }else if(a.type==='objet'){
-    // objet lesté : pris au fond, remonte collé au nageur, puis relâché en surface et retombe lentement
-    if(a.phase==='down' && a.t>=1){
-     a.o._taken=true;
-     sim.carry={type:'objet', xPool:a.xPool, yM:a.o.yM, depthM:DEPTH, fallT:0, held:true, anchorX:a.xPool};
-     a.phase='up'; a.t=0;
-    }else if(a.phase==='up'){
-     const p=Math.min(1,a.t/1.0);
-     if(sim.carry && sim.carry.type==='objet' && sim.carry.held){
-      sim.carry.depthM = DEPTH*(1-p);
-     }
-     if(a.t>=1){
-      if(sim.carry && sim.carry.type==='objet'){ sim.carry.depthM=0.0; }
-      a.phase='hold'; a.t=0;
-     }
-    }else if(a.phase==='hold' && a.t>=0.6){
-     if(sim.carry && sim.carry.type==='objet'){
-      sim.carry.held=false; sim.carry.fallT=0; sim.carry.depthM=0.0; sim.carry.xPool = sim.carry.anchorX;
-     }
-     a.o._done=true; sim.action=null;
-    }
-   }else if(a.type==='mannequin'){
-    if(a.phase==='down' && a.t>=1){
-     a.o._taken=true;
-     sim.carry={type:'mannequin', xPool:a.xPool, yM:a.o.yM, depthM:DEPTH, fallT:0, held:true, anchorX:a.xPool};
-     a.phase='up'; a.t=0;
-    }else if(a.phase==='up'){
-     const p=Math.min(1,a.t/1.0);
-     if(sim.carry && sim.carry.type==='mannequin' && sim.carry.held){
-      sim.carry.depthM = DEPTH*(1-p);
-     }
-     if(a.t>=1){
-      if(sim.carry && sim.carry.type==='mannequin' && sim.carry.held){ sim.carry.depthM=0.0; }
-      a.phase='tow'; a.t=0;
-     }
-    }else if(a.phase==='tow'){
-     const towV=1.7;
-     sim.s += towV*dt;
-     const swimmerX = getXPool(sim.len, sim.s);
-     const behind = (sim.len%2===1) ? -0.6 : 0.6;
-
-     if(sim.carry && sim.carry.type==='mannequin'){
-      sim.carry.xPool = swimmerX + behind;
-      sim.carry.anchorX = sim.carry.xPool;
-     }
-
-     // si le remorquage dépasse la fin de longueur, terminer à la bordure (évite un blocage)
-     if(sim.s >= POOL_LEN-0.001){
-      if(sim.carry && sim.carry.type==='mannequin'){
-       sim.carry.held=false; sim.carry.fallT=0; sim.carry.depthM=0.0; sim.carry.xPool = sim.carry.anchorX;
-      }
-      a.o._done=true; sim.action=null;
-     }else if(sim.s - a.pos >= a.rem){
-      if(sim.carry && sim.carry.type==='mannequin'){
-       sim.carry.held=false; sim.carry.fallT=0; sim.carry.depthM=0.0; sim.carry.xPool = sim.carry.anchorX;
-      }
-      a.o._done=true; sim.action=null;
-     }
-     if(sim.s>POOL_LEN) sim.s=POOL_LEN;
-    }
-   }
-  }
- }else{
-  sim.s += v*dt;
- }
-
- sim.turnT += dt;
-
- // chute de l'objet/mannequin après lâcher
+ // objet/mannequin relâché : il redescend au fond puis disparaît
  if(sim.carry && !sim.carry.held){
   sim.carry.fallT += dt;
   const prog=Math.min(1, sim.carry.fallT/3.0);
-  sim.carry.depthM = prog*DEPTH;
-  if(sim.carry.type==='objet' || sim.carry.type==='mannequin'){ sim.carry.xPool = sim.carry.anchorX; }
-  // une fois retombé au fond, ne plus afficher l'objet/mannequin
-  if(prog>=1){ sim.carry=null; }
+  sim.carry.depthM = lerp(sim.carry.depthM, DEPTH-0.1, Math.min(1, dt*1.2));
+  if(prog>=1) sim.carry=null;
  }
 
- // déclenchement d'obstacles
- if(sim.running && !sim.action){
-  const o=obstacleNearCurrent();
-  if(o) beginAction(o);
- }
+ if(sim.running && !sim.action && !sim.turn){ const o=obstacleNearCurrent(); if(o) beginAction(o); }
+ if(sim.running && !sim.action && !sim.turn && sim.s>=WALL-1e-3) startTurn();
 
- // fin de longueur
- if(sim.s >= POOL_LEN-0.001 && !sim.action){
-  finishLength();
+ // couloir : changement de côté progressif après le virage
+ const ty=laneY(sim.len);
+ sim.yM = lerp(sim.yM, ty, 1-Math.exp(-dt*(sim.s<4?1.6:3)));
+
+ // vitesses lissées (inclinaison du corps)
+ if(dt>0 && !sim._jump){
+  const k=1-Math.exp(-dt*9);
+  sim.vs=lerp(sim.vs,(sim.s-s0)/dt,k); sim.vd=lerp(sim.vd,(sim.depth-d0)/dt,k);
  }
+ sim._jump=false;
+
+ // rotation sur le dos après la culbute, puis retour ventral ; sur le dos pour le remorquage
+ const rollT = sim.mode==='tow' ? -1 : 1;
+ const rate = (sim.len>1 && sim.s<2.6 && sim.mode!=='tow') ? 2.2 : 4;
+ sim.roll = lerp(sim.roll, rollT, 1-Math.exp(-dt*rate));
+
+ // rythmes de nage
+ const strokeHz = {crawl:0.8, mat:0.9, climb:0.9, hold:0.6, carryUp:0.6, grab:0.5, tow:0.55, glide:0, under:0, dive:0, turn:0, block:0}[sim.mode] ?? 0.8;
+ sim.stroke += dt*Math.PI*2*strokeHz;
+ const kickHz = {crawl:2.4, glide:1.3, under:1.3, carryUp:1.6, hold:1.8, tow:1.8, mat:1.0, climb:1.0, grab:0.6, turn:0, dive:0, block:0}[sim.mode] ?? 2;
+ sim.kick += dt*Math.PI*2*kickHz;
 }
-
 
 function swimmerPose(){
- const len=sim.len;
- const goingRight = (len%2===1);
- const xPool = getXPool(len, sim.s);
-
- const yStart = goingRight ? 1.9 : 0.6;
- const yPrev  = goingRight ? 0.6 : 1.9;
- let yM=yStart;
- if(sim.s < 2.0 && len>1){
-  const k=Math.min(1, sim.s/2.0);
-  yM = yPrev + (yStart-yPrev)*k;
- }
-
- let depthM = baseDepthRule(sim.s);
- let mode='swim';
-
- if(sim.action){
-  const a=sim.action;
-  if(a.type==='apnee'){
-   mode='under';
-   const start=a.pos, end=a.pos+a.total;
-   const u=(sim.s-start)/(end-start||1);
-   const target=1.0;
-   let d;
-   if(u<0.25) d=target*(u/0.25);
-   else if(u<0.75) d=target;
-   else d=target*(1-(u-0.75)/0.25);
-   depthM = Math.max(depthM, d);
-  }else if(a.type==='tapis'){
-   mode='walk';
-   depthM = -0.25;
-  }else if(a.type==='cerceau'){
-   mode='under';
-   depthM = (a.phase==='down') ? DEPTH*Math.min(1,a.t/1.0) : DEPTH*(1-Math.min(1,a.t/1.0));
-  }else if(a.type==='objet'){
-   mode='under';
-   if(a.phase==='down') depthM = DEPTH*Math.min(1,a.t/1.0);
-   else if(a.phase==='up') depthM = DEPTH*(1-Math.min(1,a.t/1.0));
-   else depthM = 0.0;
-  }else if(a.type==='mannequin'){
-   if(a.phase==='down') {mode='under'; depthM=DEPTH*Math.min(1,a.t/1.0);}
-   else if(a.phase==='up'){mode='under'; depthM=DEPTH*(1-Math.min(1,a.t/1.0));}
-   else {mode='tow'; depthM=0.0;}
-  }
- }
-
- let ethAlpha=1.0;
-const mp=maxPassedDist(len);
-if(mp>=0 && sim.s > mp + 0.2 && mode==='under'){ ethAlpha = 0.25; }
-const fadeStart=24.0;
-if(sim.s>fadeStart){ ethAlpha *= Math.max(0, 1 - (sim.s-fadeStart)/(POOL_LEN-fadeStart)); }
-return {xPool,yM,depthM,goingRight,mode,ethAlpha};
+ return {xPool:getXPool(sim.len, sim.s), yM:sim.yM, depthM:sim.depth, goingRight:(sim.len%2===1), mode:sim.mode};
 }
 
-/* ========= Stick swimmer drawing with CRAWL circles ========= */
-function drawStick(ctx, x, y, dir, alpha, params){
- const {scale, under, tow, t} = params;
+/* ========= Dessin du nageur ========= */
+const COL={skin:'#f2c29b', skinFar:'#d39a72', cap:'#e53935', capHi:'#ff7b72', suit:'#0d47a1', line:'rgba(40,20,10,.35)',
+  manBody:'#ffb300', manDark:'#e08e00', manHead:'#ffd54f', obj:'#37474f'};
 
- // proportions (swimmer ≈ 1.70m)
- const trunk=0.48*scale;     // slightly longer torso
- const armL=0.32*scale*0.90;
- const legL=0.34*scale;
- const headR=0.12*scale;
+function limb(ctx, pts, w, col){
+ ctx.strokeStyle=col; ctx.lineWidth=w; ctx.lineCap='round'; ctx.lineJoin='round';
+ ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]); for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i][0],pts[i][1]); ctx.stroke();
+}
+function dot(ctx,x,y,r,col){ ctx.fillStyle=col; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); }
 
- const hipX = x - dir*trunk*0.18;
- const hipY = y + trunk*0.08;
- const shX  = x + dir*trunk*0.10;
- const shY  = y - trunk*0.06;
+/* bras (vue de côté) : angle θ autour de l'épaule — 0 devant, π/2 vers le ventre */
+function armSide(ctx, S, th, bend, col){
+ const e=[S[0]+0.31*Math.cos(th), S[1]+0.31*Math.sin(th)];
+ const th2=th+bend;
+ const h=[e[0]+0.3*Math.cos(th2), e[1]+0.3*Math.sin(th2)];
+ limb(ctx,[S,e,h],0.095,col); dot(ctx,h[0],h[1],0.055,col);
+ return h;
+}
+function legSide(ctx, H, phi, bend, col){
+ const k=[H[0]-0.43*Math.cos(phi), H[1]+0.43*Math.sin(phi)];
+ const p2=phi+bend;
+ const f=[k[0]-0.42*Math.cos(p2), k[1]+0.42*Math.sin(p2)];
+ limb(ctx,[H,k,f],0.13,col);
+ // pied
+ limb(ctx,[f,[f[0]-0.12*Math.cos(p2+0.5), f[1]+0.12*Math.sin(p2+0.5)]],0.08,col);
+}
 
- const cyc = (t*2.0) % (Math.PI*2);
- const walk = params.walk===true;
- // bigger kick only in normal crawl
- const kickAmp = (!under && !tow && !walk) ? 1.55 : 0.45;
- const kick = Math.sin(cyc*2.0)*kickAmp;
- const snake = params.snake===true;
- const tilt = params.tilt || 0;
+function drawManikin(ctx, len){ // mannequin couché (local : tête vers +x)
+ ctx.fillStyle=COL.manBody; ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=0.025;
+ roundRectPath(ctx,-len*0.55,-0.14,len*0.75,0.28,0.12); ctx.fill(); ctx.stroke();
+ ctx.fillStyle=COL.manDark; roundRectPath(ctx,-len*0.55,-0.14,len*0.2,0.28,0.1); ctx.fill();
+ dot(ctx,len*0.3,0,0.12,COL.manHead); ctx.beginPath(); ctx.arc(len*0.3,0,0.12,0,Math.PI*2); ctx.stroke();
+}
+function drawObj(ctx){ // haltère / objet lesté (local)
+ ctx.fillStyle=COL.obj;
+ ctx.fillRect(-0.12,-0.025,0.24,0.05); ctx.fillRect(-0.17,-0.08,0.06,0.16); ctx.fillRect(0.11,-0.08,0.06,0.16);
+}
 
- let hand1=null, hand2=null, foot1=null, foot2=null;
-
- ctx.save();
- ctx.globalAlpha = alpha;
-
- // tilt whole body around its center (used for head-down dive)
- if(tilt){
-  ctx.translate(x,y);
-  ctx.rotate(tilt);
-  ctx.translate(-x,-y);
- }
-
- ctx.lineCap='round';
- ctx.lineWidth=Math.max(2, scale*0.06);
- ctx.strokeStyle='rgba(25,25,25,0.98)';
-
- // trunk
- ctx.beginPath();
- if(snake){
-  const midX=(hipX+shX)/2;
-  const midY=(hipY+shY)/2 + Math.sin(cyc*2.2)*0.12*scale;
-  ctx.moveTo(hipX,hipY);
-  ctx.quadraticCurveTo(midX,midY,shX,shY);
- }else{
-  ctx.moveTo(hipX,hipY);
-  ctx.lineTo(shX,shY);
- }
- ctx.stroke();
-
- // green swim briefs
- ctx.fillStyle='rgba(40,180,80,0.95)';
- ctx.beginPath();
- const bx1 = hipX - dir*trunk*0.08, by1 = hipY - trunk*0.02;
- const bx2 = hipX + dir*trunk*0.20, by2 = hipY - trunk*0.11;
- const bx3 = hipX + dir*trunk*0.18, by3 = hipY + trunk*0.18;
- const bx4 = hipX - dir*trunk*0.10, by4 = hipY + trunk*0.12;
- ctx.moveTo(bx1,by1); ctx.lineTo(bx2,by2); ctx.lineTo(bx3,by3); ctx.lineTo(bx4,by4);
- ctx.closePath(); ctx.fill();
-
-
-
- // head
- ctx.fillStyle='rgba(220,60,60,0.95)';
- ctx.beginPath();
- ctx.arc(x + dir*(trunk*0.35), y - trunk*0.10, headR, 0, Math.PI*2);
- ctx.fill();
-
- // arms
- ctx.strokeStyle='rgba(25,25,25,0.98)';
+function drawBodySide(ctx, mode, stroke, kick, held){
+ const S=[0.5,-0.02], H=[-0.1,0.02];
+ const under = (mode==='under'||mode==='glide'||mode==='dive'||mode==='block');
+ // ----- membres éloignés (plus sombres) puis proches
+ const arms=[], legs=[];
  if(under){
-  // arms forward fixed (underwater / dive)
-  const armLen = armL*1.15;
-  const a1x = shX + dir*armLen, a1y = shY;
-  const a2x = shX + dir*armLen, a2y = shY + armL*0.15;
-  ctx.beginPath(); ctx.moveTo(shX,shY); ctx.lineTo(a1x,a1y); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(shX,shY); ctx.lineTo(a2x,a2y); ctx.stroke();
-  hand1={x:a1x,y:a1y}; hand2={x:a2x,y:a2y};
-
- }else if(walk){
-  // marcher sur le tapis : bras et jambes alternés
-  const step = Math.sin(cyc*2.0);
-  const armSwing = step*0.35*armL;
-  const legSwing = -step*0.30*legL;
-
-  const a1x = shX + dir*armL*0.90, a1y = shY + armSwing;
-  const a2x = shX + dir*armL*0.90, a2y = shY - armSwing;
-  ctx.beginPath(); ctx.moveTo(shX,shY); ctx.lineTo(a1x,a1y); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(shX,shY); ctx.lineTo(a2x,a2y); ctx.stroke();
-  hand1={x:a1x,y:a1y}; hand2={x:a2x,y:a2y};
-
-  const f1x = hipX - dir*legL*0.45, f1y = hipY + legL + legSwing;
-  const f2x = hipX - dir*legL*0.45, f2y = hipY + legL - legSwing;
-  ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(f1x,f1y); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(f2x,f2y); ctx.stroke();
-  foot1={x:f1x,y:f1y}; foot2={x:f2x,y:f2y};
-
- }else if(tow){
-  // forward holding (towing mannequin)
-  const armLen = armL*1.15;
-  const a1x = shX + dir*armLen, a1y = shY - armL*0.10;
-  const a2x = shX + dir*armLen, a2y = shY + armL*0.10;
-  ctx.beginPath(); ctx.moveTo(shX,shY); ctx.lineTo(a1x,a1y); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(shX,shY); ctx.lineTo(a2x,a2y); ctx.stroke();
-  hand1={x:a1x,y:a1y}; hand2={x:a2x,y:a2y};
-
- }else if(snake){
-  // tapis: ramper (ondulations)
-  const und = Math.sin(cyc*2.6)*0.22*armL;
-  const armLen = armL*1.15;
-  const a1x = shX + dir*armLen, a1y = shY + und;
-  const a2x = shX + dir*armLen, a2y = shY - und;
-  ctx.beginPath(); ctx.moveTo(shX,shY); ctx.lineTo(a1x,a1y); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(shX,shY); ctx.lineTo(a2x,a2y); ctx.stroke();
-  hand1={x:a1x,y:a1y}; hand2={x:a2x,y:a2y};
-
-  const f1x = hipX - dir*legL*1.00, f1y = hipY + und;
-  const f2x = hipX - dir*legL*1.00, f2y = hipY - und;
-  ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(f1x,f1y); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(f2x,f2y); ctx.stroke();
-  foot1={x:f1x,y:f1y}; foot2={x:f2x,y:f2y};
-
- }else{
-  // crawl: circular path but fixed arm length (underwater arm = overwater arm)
-  const p1 = (cyc + Math.PI*0.00)%(Math.PI*2);
-  const p2 = (cyc + Math.PI)%(Math.PI*2);
-  const cx = shX + dir*armL*0.10;
-  const cy = shY - armL*0.35;
-  const r  = armL*0.95;
-
-  const target1 = {hx: cx + dir*(r*Math.cos(p1)), hy: cy + r*Math.sin(p1)};
-  const target2 = {hx: cx + dir*(r*Math.cos(p2)), hy: cy + r*Math.sin(p2)};
-
-  const armLen = armL*1.15;
-  function fixedHand(target){
-   const vx = target.hx - shX;
-   const vy = target.hy - shY;
-   const d = Math.hypot(vx,vy) || 1;
-   return {hx: shX + vx/d*armLen, hy: shY + vy/d*armLen};
-  }
-  const h1 = fixedHand(target1);
-  const h2 = fixedHand(target2);
-
-  ctx.beginPath(); ctx.moveTo(shX,shY); ctx.lineTo(h1.hx,h1.hy); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(shX,shY); ctx.lineTo(h2.hx,h2.hy); ctx.stroke();
-  hand1={x:h1.hx,y:h1.hy}; hand2={x:h2.hx,y:h2.hy};
+  arms.push([-0.06,0.08],[0.04,0.1]);
+  const d=0.16*Math.sin(kick);
+  legs.push([d,0.12],[d+0.05,0.12]);
+ }else if(mode==='turn'){
+  arms.push([1.3,0.4],[1.5,0.4]); legs.push([2.0,-2.4],[2.1,-2.4]);
+ }else if(mode==='mat' || mode==='climb'){
+  const a=0.25+0.5*Math.sin(stroke);
+  arms.push([a,0.6],[0.25+0.5*Math.sin(stroke+Math.PI),0.6]);
+  legs.push([0.1*Math.sin(kick),0.35],[0.1*Math.sin(kick+Math.PI),0.35]);
+ }else if(mode==='carryUp' || mode==='grab'){
+  arms.push([1.0,0.5],[0.9+0.4*Math.sin(stroke),0.4]);
+  legs.push([0.22*Math.sin(kick),0.25],[0.22*Math.sin(kick+Math.PI),0.25]);
+ }else if(mode==='hold'){
+  arms.push([-1.25,0.2],[0.8+0.5*Math.sin(stroke),0.5]);
+  legs.push([0.3+0.25*Math.sin(kick),0.5],[0.3+0.25*Math.sin(kick+Math.PI),0.5]);
+ }else if(mode==='tow'){
+  arms.push([0.9,0.7],[1.6+0.5*Math.sin(stroke),0.5]);
+  legs.push([0.22*Math.sin(kick),0.35],[0.22*Math.sin(kick+Math.PI),0.35]);
+ }else{ // crawl
+  const th=stroke%(Math.PI*2);
+  const bendOf=(t)=>{ t=((t%(Math.PI*2))+Math.PI*2)%(Math.PI*2); return t>Math.PI ? -0.9*Math.sin(t-Math.PI) : 0.45*Math.sin(t); };
+  arms.push([th, bendOf(th)],[th+Math.PI, bendOf(th+Math.PI)]);
+  legs.push([0.2*Math.sin(kick),0.18+0.12*Math.sin(kick+0.8)],[0.2*Math.sin(kick+Math.PI),0.18+0.12*Math.sin(kick+Math.PI+0.8)]);
  }
+ armSide(ctx,S,arms[1][0],arms[1][1],COL.skinFar);
+ legSide(ctx,H,legs[1][0],legs[1][1],COL.skinFar);
+ // tronc
+ limb(ctx,[H,S],0.27,COL.skin);
+ limb(ctx,[[-0.2,0.03],[0.07,0.01]],0.29,COL.suit);
+ // tête + bonnet
+ dot(ctx,0.76,-0.03,0.115,COL.skin);
+ ctx.fillStyle=COL.cap; ctx.beginPath(); ctx.arc(0.76,-0.03,0.122,Math.PI*0.62,Math.PI*1.9); ctx.closePath(); ctx.fill();
+ legSide(ctx,H,legs[0][0],legs[0][1],COL.skin);
+ const hand=armSide(ctx,S,arms[0][0],arms[0][1],COL.skin);
+ // objet tenu
+ if(held==='objet'){ ctx.save(); ctx.translate(hand[0],hand[1]+0.04); drawObj(ctx); ctx.restore(); }
+}
 
- // legs
- if(under && !tow){
-  // legs more streamlined underwater
-  const und = Math.sin(cyc*2.6)*0.20*armL;
-  const f1x = hipX - dir*legL*1.00, f1y = hipY + und;
-  const f2x = hipX - dir*legL*1.00, f2y = hipY - und;
-  ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(f1x,f1y); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(f2x,f2y); ctx.stroke();
-  foot1={x:f1x,y:f1y}; foot2={x:f2x,y:f2y};
-
- }else if(walk){
-  // already drawn in walk branch
- }else if(snake){
-  // already drawn in snake branch
- }else{
-  const f1x = hipX - dir*legL*1.05, f1y = hipY + legL*0.32*kick;
-  const f2x = hipX - dir*legL*1.05, f2y = hipY - legL*0.32*kick;
-  ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(f1x,f1y); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(f2x,f2y); ctx.stroke();
-  foot1={x:f1x,y:f1y}; foot2={x:f2x,y:f2y};
+function drawBodyTop(ctx, mode, stroke, kick, held, alphaUnder){
+ const under = (mode==='under'||mode==='glide'||mode==='dive'||mode==='block');
+ const sh=0.21;
+ const hands=[];
+ if(under || mode==='turn'){
+  hands.push({h:[1.2,-0.06],e:[0.85,-0.14],top:true},{h:[1.2,0.06],e:[0.85,0.14],top:true});
+ }else if(mode==='mat' || mode==='climb'){
+  [0,Math.PI].forEach((ph,i)=>{ const sg=i?1:-1; const r=0.75+0.4*Math.sin(stroke+ph);
+   hands.push({h:[r,sg*0.3],e:[0.55+r*0.25,sg*0.36],top:true}); });
+ }else if(mode==='tow' || mode==='carryUp' || mode==='grab' || mode==='hold'){
+  hands.push({h:[0.85,0.28],e:[0.62,0.34],top:true});
+  const r=0.4+0.35*Math.sin(stroke); hands.push({h:[r,-0.42],e:[0.4,-0.36],top:true});
+ }else{ // crawl vu de dessus
+  [0,Math.PI].forEach((ph,i)=>{
+   const sg=i?1:-1; let t=((stroke+ph)%(Math.PI*2)+Math.PI*2)%(Math.PI*2);
+   if(t<Math.PI){ const u=t/Math.PI; // traction sous le corps
+    const x=lerp(1.2,-0.05,ease(u)), y=sg*(0.13+0.07*Math.sin(Math.PI*u));
+    hands.push({h:[x,y],e:[lerp(0.9,0.25,u), sg*(0.26+0.06*Math.sin(Math.PI*u))],top:false});
+   }else{ const u=(t-Math.PI)/Math.PI; // retour aérien, coude haut
+    const x=lerp(-0.05,1.2,ease(u)), y=sg*(0.2+0.2*Math.sin(Math.PI*u));
+    hands.push({h:[x,y],e:[lerp(0.2,0.75,u), sg*(0.3+0.22*Math.sin(Math.PI*u))],top:true});
+   }
+  });
  }
+ const drawArm=(a,col)=>{ const s=[0.5, a.h[1]>0?sh:-sh]; limb(ctx,[s,a.e,a.h],0.095,col); dot(ctx,a.h[0],a.h[1],0.055,col); };
+ // bras sous l'eau (sous le corps)
+ hands.filter(a=>!a.top).forEach(a=>{ ctx.save(); ctx.globalAlpha*=0.55; drawArm(a,COL.skinFar); ctx.restore(); });
+ // jambes
+ const kk=(mode==='turn')?0:1;
+ [-1,1].forEach((sg,i)=>{
+  const k=Math.sin(kick+(i?Math.PI:0));
+  const fx=(mode==='turn'?-0.45:-0.98)+0.05*k*kk, fy=sg*(0.08+(mode==='tow'||mode==='hold'?0.12*Math.abs(k):0));
+  limb(ctx,[[-0.12,sg*0.09],[(-0.12+fx)/2,sg*0.1],[fx,fy]],0.13,COL.skin);
+  dot(ctx,fx-0.04,fy,0.06,COL.skin);
+ });
+ // tronc
+ ctx.fillStyle=COL.skin; ctx.beginPath();
+ ctx.moveTo(0.58,-sh); ctx.quadraticCurveTo(0.66,0,0.58,sh); ctx.lineTo(-0.16,0.16); ctx.quadraticCurveTo(-0.24,0,-0.16,-0.16); ctx.closePath(); ctx.fill();
+ ctx.fillStyle=COL.suit; ctx.beginPath();
+ ctx.moveTo(0.06,-0.17); ctx.lineTo(0.06,0.17); ctx.lineTo(-0.16,0.16); ctx.quadraticCurveTo(-0.25,0,-0.16,-0.16); ctx.closePath(); ctx.fill();
+ dot(ctx,0.52,-sh,0.075,COL.skin); dot(ctx,0.52,sh,0.075,COL.skin);
+ // tête (bonnet)
+ dot(ctx,0.76,0,0.12,COL.cap);
+ ctx.fillStyle=COL.capHi; ctx.beginPath(); ctx.arc(0.74,-0.03,0.05,0,Math.PI*2); ctx.fill();
+ // bras aériens / devant
+ hands.filter(a=>a.top).forEach(a=>drawArm(a,COL.skin));
+ if(held==='objet'){ const a=hands[0]; ctx.save(); ctx.translate(a.h[0]+0.05,a.h[1]); drawObj(ctx); ctx.restore(); }
+}
 
- // simple hands / feet
- ctx.fillStyle='rgba(25,25,25,0.98)';
- const rHand = Math.max(2.2, scale*0.045);
- const rFoot = Math.max(2.4, scale*0.050);
-
- if(hand1){ ctx.beginPath(); ctx.arc(hand1.x,hand1.y,rHand,0,Math.PI*2); ctx.fill(); }
- if(hand2){ ctx.beginPath(); ctx.arc(hand2.x,hand2.y,rHand,0,Math.PI*2); ctx.fill(); }
- if(foot1){ ctx.beginPath(); ctx.arc(foot1.x,foot1.y,rFoot,0,Math.PI*2); ctx.fill(); }
- if(foot2){ ctx.beginPath(); ctx.arc(foot2.x,foot2.y,rFoot,0,Math.PI*2); ctx.fill(); }
-
+function wake(ctx, k, t, strong){ // remous derrière les pieds (vue de dessus)
+ ctx.save(); ctx.fillStyle='rgba(255,255,255,.55)';
+ for(let i=0;i<6;i++){
+  const ph=t*7+i*1.7;
+  const x=-1.05-i*0.13-0.04*Math.sin(ph), y=0.12*Math.sin(ph*1.3+i);
+  ctx.globalAlpha=(strong?0.55:0.3)*(1-i/6);
+  dot(ctx,x,y,0.07*(1-i/8),'#fff');
+ }
  ctx.restore();
 }
 
-function drawSwimmerTop(top, st, t){
- const {W,H,pad}=top;
- const x=m2x(st.xPool,W,pad,POOL_LEN);
- const y=m2y(st.yM,H,pad,LANE_W);
- const scale=(W-2*pad)/POOL_LEN;
- const swimScale=scale*1.33;
-
- const under = st.depthM>0.12 && st.mode!=='tow';
- const tow = (st.mode==='tow');
- 
- let tilt = 0;
- if(sim.action && (sim.action.type==='objet' || sim.action.type==='mannequin') && sim.action.phase==='down') tilt = 0.95;
-let alpha = under ? 0.25 : 1.0; alpha = Math.min(alpha, st.ethAlpha||1.0);
-
- drawStick(ctxT, x, y, st.goingRight?1:-1, alpha, {scale:swimScale, under, tow, t, snake: false, walk: (st.mode==='walk'), tilt: tilt});
-
- // mannequin / objet
- if(sim.carry && sim.carry.type==='mannequin' && sim.carry.held){
-  const dir = st.goingRight ? 1 : -1;
-  const towMode = (st.mode==='tow');
-  const scale=(W-2*pad)/POOL_LEN;
-  const bodyL=clamp(0.8*scale, 8, 20);     // ~80cm max
-  const bodyH=clamp(0.24*scale, 5, 10);
-
-  // porté sur le nageur (comme la vue de côté) : tête au-dessus du corps, sur le nageur
-  const headX = x + dir*6;
-  const headY = y - bodyH*1.05;
-
-  ctxT.save();
-  ctxT.globalAlpha = 0.95;
-  ctxT.translate(headX, headY);
-  if(dir < 0) ctxT.scale(-1, 1);
-  const ang = towMode ? 0.22 : 0.30;
-  ctxT.rotate(ang);
-
-  ctxT.fillStyle='#ffeb3b';
-  ctxT.fillRect(-bodyL, -bodyH*0.20, bodyL, bodyH);
-
-  ctxT.beginPath();
-  ctxT.arc(0, -bodyH*0.82, Math.max(3.2, bodyH*0.45), 0, Math.PI*2);
-  ctxT.fill();
-
-  ctxT.restore();
- }
-
- if(sim.carry && sim.carry.type==='objet' && sim.carry.held){
-  // objet lesté collé au nageur pendant la remontée
-  const dir = st.goingRight ? 1 : -1;
-  const ox = x + dir*12;
-  const oy = y + (st.depthM>0.12 ? 6 : -16);
-  ctxT.save();
-  ctxT.globalAlpha = sim.carry.held ? 1.0 : 0.7;
-  ctxT.fillStyle='#424242';
-  ctxT.fillRect(ox-4,oy-1.2,8,2.4);
-  ctxT.fillRect(ox-6.8,oy-4.2,2.6,8.4);
-  ctxT.fillRect(ox+4.2,oy-4.2,2.6,8.4);
-  ctxT.restore();
- }
+function smoothPitch(kx, ky){
+ const dtv=Math.max(0, sim.time-sim._drawT); sim._drawT=sim.time;
+ // la vue de côté exagère la profondeur : on atténue l'inclinaison pour un rendu naturel
+ let target = Math.atan2(sim.vd*ky*0.45, Math.max(0.05, sim.vs)*kx);
+ if(sim.mode==='grab') target=0;
+ if(sim.mode==='hold'||sim.mode==='tow') target=-0.12;
+ if(sim.mode==='block') target=0.35;
+ target=clamp(target,-0.7,0.75);
+ sim.pitch = dtv>0 ? lerp(sim.pitch, target, 1-Math.exp(-dtv*5)) : sim.pitch;
+ return sim.pitch;
 }
 
-function drawSwimmerSide(side, st, t){
- const {W,H,pad,surfaceY,bottomY}=side;
- const yAt=(m)=> surfaceY + (m/DEPTH)*(bottomY-surfaceY);
- const x=m2x(st.xPool,W,pad,POOL_LEN);
- const y=yAt(st.depthM);
- const scale=(W-2*pad)/POOL_LEN;
- const swimScale=scale*1.33;
+function drawSwimmerSide(side, st){
+ const {W,pad,surfaceY,bottomY}=side;
+ const kx=(W-2*pad)/POOL_LEN, ky=(bottomY-surfaceY)/DEPTH;
+ const x=m2x(st.xPool,W,pad,POOL_LEN), y=surfaceY+st.depthM*ky;
+ const dir=st.goingRight?1:-1;
+ const k=kx*1.15;
+ const pitch = sim.turn ? sim.flip*Math.PI : smoothPitch(kx,ky);
+ const held = sim.carry && sim.carry.held ? sim.carry.type : null;
 
- const under = st.depthM>0.12 && st.mode!=='tow';
- const tow = (st.mode==='tow');
-
- 
- let tilt = 0;
- if(sim.action && (sim.action.type==='objet' || sim.action.type==='mannequin') && sim.action.phase==='down') tilt = 0.95;
-drawStick(ctxS, x, y, st.goingRight?1:-1, 1.0, {scale:swimScale, under, tow, t, snake: false, walk: (st.mode==='walk'), tilt: tilt});
-
- if(sim.carry && sim.carry.type==='mannequin' && sim.carry.held){
-  const dir = st.goingRight ? 1 : -1;
-  const towMode = (st.mode==='tow');
-  const scale=(W-2*pad)/POOL_LEN;
-  const bodyL=clamp(0.8*scale, 8, 20);     // ~80cm max
-  const bodyH=clamp(0.24*scale, 5, 10);
-
-  // porté sur le nageur : tête proche de la tête du nageur, en surface si remorquage
-  const headX = x + dir*6;
-  const headY = towMode ? (surfaceY + 2) : (y - bodyH*1.05);
-
+ // bulles quand le nageur est immergé
+ if(st.depthM>0.25){
   ctxS.save();
-  ctxS.globalAlpha = 0.95;
-  ctxS.translate(headX, headY);
-  if(dir < 0) ctxS.scale(-1, 1);
-  const ang = towMode ? 0.22 : 0.30;
-  ctxS.rotate(ang);
-
-  ctxS.fillStyle='#ffeb3b';
-  // corps sur le nageur (pas dessous)
-  ctxS.fillRect(-bodyL, -bodyH*0.20, bodyL, bodyH);
-
-  // tête vers le haut (surface)
-  ctxS.beginPath();
-  ctxS.arc(0, -bodyH*0.82, Math.max(3.5, bodyH*0.45), 0, Math.PI*2);
-  ctxS.fill();
-
+  for(let i=0;i<4;i++){
+   const u=((sim.time*0.9+i*0.27)%1);
+   const bx=x+dir*(0.75-0.25*i)*k*0.6, by=y-0.25*k-u*(y-surfaceY-0.25*k);
+   ctxS.strokeStyle=`rgba(255,255,255,${0.6*(1-u)})`; ctxS.lineWidth=1.2;
+   ctxS.beginPath(); ctxS.arc(bx+Math.sin(u*9+i)*3, by, 2+i*0.6, 0, Math.PI*2); ctxS.stroke();
+  }
   ctxS.restore();
  }
 
-if(sim.carry && sim.carry.type==='objet' && sim.carry.held){
-  const ox = x + (st.goingRight?1:-1)*14;
-  const oy = yAt(sim.carry.depthM) - 10;
-  ctxS.fillStyle='#424242';
-  ctxS.fillRect(ox-4,oy+1,8,3);
-  ctxS.fillRect(ox-6.8,oy-3,2.6,11);
-  ctxS.fillRect(ox+4.2,oy-3,2.6,11);
+ ctxS.save();
+ ctxS.translate(x,y); ctxS.scale(dir*k, k); ctxS.rotate(pitch);
+ // mannequin sous le bras (remontée) — derrière le nageur
+ if(held==='mannequin' && sim.mode!=='tow'){ ctxS.save(); ctxS.translate(0.55,0.3); ctxS.rotate(0.15); drawManikin(ctxS,0.9); ctxS.restore(); }
+ ctxS.save(); ctxS.scale(1, sim.roll>=0 ? Math.max(0.5,sim.roll) : Math.min(-0.5,sim.roll));
+ ctxS.lineWidth=0.02;
+ drawBodySide(ctxS, st.mode, sim.stroke, sim.kick, held);
+ ctxS.restore();
+ // remorquage : mannequin sur la poitrine, tête hors de l'eau
+ if(held==='mannequin' && sim.mode==='tow'){ ctxS.save(); ctxS.translate(0.25,-0.22); ctxS.rotate(-0.08); drawManikin(ctxS,0.95); ctxS.restore(); }
+ ctxS.restore();
+
+ // ligne d'eau par-dessus si le nageur est en surface (effet d'immersion partielle)
+ if(st.depthM>-0.35 && st.depthM<0.3){
+  ctxS.save(); ctxS.globalAlpha=0.35; ctxS.fillStyle='#1e88e5';
+  ctxS.fillRect(x-1.3*k, surfaceY, 2.6*k, Math.max(0,(0.3-st.depthM))*ky*0.5);
+  ctxS.restore();
+  ctxS.strokeStyle='rgba(255,255,255,.75)'; ctxS.lineWidth=2;
+  ctxS.beginPath(); ctxS.moveTo(x-1.4*k, surfaceY); ctxS.lineTo(x+1.4*k, surfaceY); ctxS.stroke();
  }
 }
 
-/* ========= Loop ========= */
+function drawSwimmerTop(top, st){
+ const {W,H,pad}=top;
+ const kx=(W-2*pad)/POOL_LEN, kyLane=(H-2*pad)/LANE_W;
+ const x=m2x(st.xPool,W,pad,POOL_LEN), y=m2y(st.yM,H,pad,LANE_W);
+ const dir=st.goingRight?1:-1;
+ const depthF=clamp(st.depthM/DEPTH,0,1);
+ const k=kx*1.15*(1-0.12*depthF);
+ const held = sim.carry && sim.carry.held ? sim.carry.type : null;
+ // lacet : changement de côté de couloir
+ const targetYaw = clamp(Math.atan2((laneY(sim.len)-sim.yM)*kyLane*0.9, 2.2*kx), -0.35, 0.35)*dir;
+ sim.yaw = lerp(sim.yaw, targetYaw, 0.2);
 
+ ctxT.save();
+ ctxT.translate(x,y); ctxT.scale(dir,1); ctxT.rotate(sim.yaw*dir); ctxT.scale(k,k);
+ if(sim.turn) ctxT.scale(Math.cos(sim.flip*Math.PI),1);
+ const surf = st.depthM<0.2 && (st.mode==='crawl'||st.mode==='tow'||st.mode==='hold');
+ if(surf) wake(ctxT,k,sim.time,st.mode==='crawl');
+ // ombre portée au fond quand immergé
+ ctxT.globalAlpha = 1 - 0.55*depthF;
+ if(held==='mannequin'){
+  ctxT.save();
+  if(sim.mode==='tow'){ ctxT.translate(0.25,0.32); } else { ctxT.translate(0.6,0.34); }
+  drawManikin(ctxT,0.95); ctxT.restore();
+ }
+ drawBodyTop(ctxT, st.mode, sim.stroke, sim.kick, held);
+ ctxT.restore();
+ // reflet bleu quand immergé
+ if(depthF>0.05){
+  ctxT.save(); ctxT.globalAlpha=0.35*depthF; ctxT.fillStyle='#1565c0';
+  ctxT.beginPath(); ctxT.ellipse(x, y, 1.3*k, 0.45*k, 0, 0, Math.PI*2); ctxT.fill(); ctxT.restore();
+ }
+}
+
+/* ========= Objets relâchés ========= */
 function drawDetachedCarryTop(top){
  if(!sim.carry || sim.carry.held) return;
  const {W,H,pad}=top;
- const x=m2x(sim.carry.xPool,W,pad,POOL_LEN);
- const y=m2y(sim.carry.yM,H,pad,LANE_W);
-
- if(sim.carry.type==='objet'){
-  ctxT.save();
-  ctxT.globalAlpha=0.85;
-  ctxT.fillStyle='#424242';
-  ctxT.fillRect(x-4,y-1.2,8,2.4);
-  ctxT.fillRect(x-6.8,y-4.2,2.6,8.4);
-  ctxT.fillRect(x+4.2,y-4.2,2.6,8.4);
-  ctxT.restore();
- }else if(sim.carry.type==='mannequin'){
-  const scale=(W-2*pad)/POOL_LEN;
-  const bw=clamp(0.8*scale, 8, 20);
-  const bh=clamp(0.24*scale, 5, 10);
-  ctxT.save();
-  ctxT.globalAlpha=0.85;
-  ctxT.fillStyle='#ffeb3b';
-  ctxT.fillRect(x-bw/2,y-bh/2,bw,bh);
-  ctxT.beginPath();
-  ctxT.arc(x, y-bh/2- Math.max(4, bh*0.55), Math.max(4, bh*0.55), 0, Math.PI*2);
-  ctxT.fill();
-  ctxT.restore();
- }
+ const k=(W-2*pad)/POOL_LEN*1.15;
+ const x=m2x(sim.carry.xPool,W,pad,POOL_LEN), y=m2y(sim.carry.yM,H,pad,LANE_W);
+ ctxT.save(); ctxT.globalAlpha=0.85-0.4*clamp(sim.carry.depthM/DEPTH,0,1);
+ ctxT.translate(x,y); ctxT.scale(k,k);
+ if(sim.carry.type==='objet') drawObj(ctxT); else drawManikin(ctxT,0.95);
+ ctxT.restore();
 }
-
 function drawDetachedCarrySide(side){
  if(!sim.carry || sim.carry.held) return;
- const {W,H,pad,surfaceY,bottomY}=side;
- const yAt=(m)=> surfaceY + (m/DEPTH)*(bottomY-surfaceY);
- const x=m2x(sim.carry.xPool,W,pad,POOL_LEN);
- const y=yAt(sim.carry.depthM);
-
- if(sim.carry.type==='objet'){
-  ctxS.save();
-  ctxS.globalAlpha=0.85;
-  ctxS.fillStyle='#424242';
-  ctxS.fillRect(x-5,y+1,10,3);
-  ctxS.fillRect(x-8,y-3,3,11);
-  ctxS.fillRect(x+5,y-3,3,11);
-  ctxS.restore();
- }else if(sim.carry.type==='mannequin'){
-  const scale=(W-2*pad)/POOL_LEN;
-  const bw=clamp(0.8*scale, 8, 20);
-  const bh=clamp(0.24*scale, 5, 10);
-  ctxS.save();
-  ctxS.globalAlpha=0.85;
-  ctxS.fillStyle='#ffeb3b';
-  ctxS.fillRect(x-bw/2,y-bh/2,bw,bh);
-  // tête vers le haut (surface)
-  const r = Math.max(4, bh*0.55);
-  const headY = Math.max(surfaceY - r - 2, y - bh/2 - r - 2);
-  ctxS.beginPath(); ctxS.arc(x, headY, r, 0, Math.PI*2); ctxS.fill();
-  ctxS.restore();
- }
+ const {W,pad,surfaceY,bottomY}=side;
+ const k=(W-2*pad)/POOL_LEN*1.15;
+ const x=m2x(sim.carry.xPool,W,pad,POOL_LEN), y=surfaceY+(sim.carry.depthM/DEPTH)*(bottomY-surfaceY);
+ ctxS.save(); ctxS.globalAlpha=0.9; ctxS.translate(x,y); ctxS.scale(k,k);
+ if(sim.carry.type==='objet') drawObj(ctxS); else { ctxS.rotate(-0.2); drawManikin(ctxS,0.95); }
+ ctxS.restore();
 }
+
 function drawAll(){
  if(!active || !ctxT) return;
  const top=drawLaneTop();
