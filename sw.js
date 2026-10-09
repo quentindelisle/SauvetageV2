@@ -1,10 +1,11 @@
 /* Service worker — Sauvetage CA2 (hors-ligne)
    Changer CACHE_VERSION à chaque mise en ligne d'une nouvelle version. */
-const CACHE_VERSION = 'sauvetage-ca2-v5.3.1';
+const CACHE_VERSION = 'sauvetage-ca2-v6.0.0';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css',
-  './js/store.js', './js/schema.js', './js/sim.js', './js/chrono.js', './js/export.js', './js/app.js',
+  './js/store.js', './js/schema.js', './js/sim.js', './js/chrono.js', './js/export.js', './js/qr.js', './js/classe.js', './js/app.js', './js/modes.js',
+  './lib/qrcode.js', './lib/jsQR.js', './lib/zxing-reader.js', './lib/zxing_reader.wasm', './lib/xlsx.full.min.js',
   './assets/logo.jpg', './icons/icon-192.png', './icons/icon-512.png',
   './icons/icon-maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon-48.png'
 ];

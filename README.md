@@ -1,4 +1,4 @@
-# Sauvetage CA2 — Parcours & Chronométrie (V5)
+# Sauvetage CA2 — Parcours, chronométrie & observation (V6)
 
 PWA hors-ligne pour créer, visualiser et chronométrer des parcours de sauvetage aquatique (bassin 25 m).
 N'EPS numérique — Académie de Nantes · by Quentin Delisle.
@@ -28,3 +28,19 @@ icons/                Icônes PWA
 - **Compatibilité** : les fichiers `.json` exportés par la V4c s'importent tels quels ; les fichiers exportés par la V5 gardent le même format `data.nbLongueurs / data.obstacles`.
 - **Raccourcis chrono** (clavier ou télécommande de présentation Bluetooth) : Espace / Entrée / Page suivante = tap · Page précédente / ← = annuler · F = faute.
 - **Entrée dans l'eau** : paramètre du parcours (`entree` : `dive` plongeon, `jump` saut droit, `water` départ dans l'eau), réglé dans l'éditeur, exporté dans le JSON (`data.entree`) ; défaut : plongeon. Affiché dans le résumé et dans l'étape « Départ » du chrono. Les départs et le virage culbute sont des séquences de postures dans `js/sim.js` (`DIVE`, `JUMP`, `WATER`, `TURN`), suivies d'une coulée (`glideOut`).
+
+## V6 — mode enseignant / mode élève
+
+Au premier lancement, l’appareil choisit son rôle (modifiable ensuite ; code enseignant à 4 chiffres, 0000 par défaut).
+
+**Enseignant** (`js/modes.js`, données dans `js/classe.js`, clé `sca2.v6`) :
+- Élèves : import de l’appel Pronote (xlsx / csv / copier-coller ; « NOM Prénom » en colonne A ou NOM en A et Prénom en B) → affichage « Prénom N. ».
+- Programmation du cycle : nombre de leçons, pilier(s) et consignes de chaque leçon.
+- Leçon du jour : appel (absents, inaptes), parcours du jour (existants ou créés), **QR de la leçon** pour les tablettes.
+- Récupérer les résultats : scan des QR des tablettes élèves (ou fichier .json).
+- Bilan de la leçon, bilan du cycle (fiche individuelle imprimable), export Excel (Synthèse, Passages, Programmation).
+- Piliers : banque modifiable — nom, contenus, 3 critères avec leur observable (oui / non).
+
+**Élève** : scanner les infos du cours, contenus du pilier, parcours du jour (animation), chronométrer (choix du nageur + observation des 3 critères à chaque longueur), exporter ses résultats en QR (ou fichier).
+
+**QR** (`js/qr.js`, repris de l’appli Biathlon) : JSON compressé (deflate) + base45 (mode alphanumérique), découpé en plusieurs QR de 300 à 400 caractères qui défilent ; lecture caméra par le détecteur natif, ZXing (WebAssembly, `lib/`) puis jsQR ; secours « photo du QR » et fichier. Morceau : `SV:<S|R>:<id>:<i>:<n>:<données>`.

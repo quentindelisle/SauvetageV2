@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Sauvetage CA2 — Parcours & Chronométrie</title>
+<title>Sauvetage CA2 — Parcours, chronométrie & observation</title>
 <meta name="description" content="Créer, visualiser et chronométrer des parcours de sauvetage aquatique (CA2) — N'EPS numérique, Académie de Nantes.">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1020">
@@ -32,48 +32,7 @@
 <main>
 
 <!-- ============ ACCUEIL ============ -->
-<section class="view" data-view="home">
-  <div class="home">
-    <div class="home-hero">
-      <img class="home-logo" src="assets/logo.jpg" alt="N'EPS Sauvetage" width="480" height="480">
-      <div>
-        <h2 class="home-title">Parcours &amp; chronométrie<br><span>Sauvetage aquatique CA2</span></h2>
-        <p class="muted">Concevez un parcours, montrez-le en animation, chronométrez chaque passage au bord du bassin.</p>
-      </div>
-    </div>
-
-    <div class="card current-card">
-      <div class="current-head">
-        <div>
-          <div class="eyebrow">Parcours actif</div>
-          <div class="current-name" id="homeCurName">—</div>
-          <div class="muted small" id="homeCurSummary"></div>
-        </div>
-        <button class="btn ghost sm" data-go="library">Changer</button>
-      </div>
-      <canvas class="schema schema-home" id="homeSchema"></canvas>
-      <div class="btnrow">
-        <button class="btn teal lg" data-go="view"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Visualiser</button>
-        <button class="btn red lg" data-go="chrono"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 1.5M9 2h6"/></svg>Chronométrer</button>
-      </div>
-    </div>
-
-    <div class="tiles">
-      <button class="tile" data-action="newParcours">
-        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-        <b>Créer un parcours</b><span>Longueurs et obstacles</span>
-      </button>
-      <button class="tile" data-go="library">
-        <svg viewBox="0 0 24 24"><path d="M4 5h6v14H4zM14 5h6v14h-6z"/></svg>
-        <b>Mes parcours</b><span id="tileLibCount">Modèles et parcours enregistrés</span>
-      </button>
-      <button class="tile" data-go="results">
-        <svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
-        <b>Résultats</b><span id="tileResCount">Passages chronométrés</span>
-      </button>
-    </div>
-  </div>
-</section>
+<section class="view" data-view="home"></section>
 
 <!-- ============ BIBLIOTHÈQUE ============ -->
 <section class="view" data-view="library">
@@ -153,7 +112,8 @@
 <section class="view" data-view="chrono">
   <div class="wrap chrono">
     <div class="chrono-main">
-      <div class="card student">
+      <div class="card passage" id="stCtx" hidden></div>
+      <div class="card student" id="stFree">
         <input type="text" id="stNom" placeholder="NOM" autocomplete="off" class="upper">
         <input type="text" id="stPrenom" placeholder="Prénom" autocomplete="off">
         <input type="text" id="stClasse" placeholder="Classe" autocomplete="off" list="classesList" class="classe">
@@ -192,6 +152,7 @@
     </div>
 
     <div class="chrono-side">
+      <div class="card obs-card" id="obsCard" hidden></div>
       <div class="card">
         <canvas class="schema" id="chronoSchema"></canvas>
       </div>
@@ -239,12 +200,19 @@
 </dialog>
 <div id="toasts" aria-live="polite"></div>
 
+<script src="lib/qrcode.js"></script>
+<script src="lib/jsQR.js"></script>
+<script src="lib/zxing-reader.js"></script>
+<script src="lib/xlsx.full.min.js" defer></script>
 <script src="js/store.js"></script>
 <script src="js/schema.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/chrono.js"></script>
 <script src="js/export.js"></script>
+<script src="js/qr.js"></script>
+<script src="js/classe.js"></script>
 <script src="js/app.js"></script>
+<script src="js/modes.js"></script>
 <script>
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
   window.addEventListener('load', ()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));

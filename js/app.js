@@ -1,6 +1,7 @@
 /* =========================================================
    App — navigation et interfaces
    ========================================================= */
+const App = {};
 (function(){
 'use strict';
 
@@ -47,7 +48,7 @@ function setCurrent(p, silent=false){
 }
 
 /* ---------- Navigation ---------- */
-const TITLES = { home:'Sauvetage CA2', library:'Mes parcours', editor:'Éditeur', view:'Visualisation', chrono:'Chronométrie', results:'Résultats' };
+const TITLES = { home:'Sauvetage CA2', library:'Parcours', editor:'Éditeur de parcours', view:'Visualisation', chrono:'Chronométrie', results:'Passages libres' };
 let view = null;
 const leaveHooks = {}, enterHooks = {};
 
@@ -59,7 +60,8 @@ function go(name, replace=false){
 }
 async function show(name){
   if(!TITLES[name]) name='home';
-  if(view===name) return;
+  if(App.guard && !App.guard(name)) name='home';
+  if(view===name){ if(enterHooks[name] && name==='home') enterHooks[name](); return; }
   if(view && leaveHooks[view]){
     const ok = await leaveHooks[view](name);
     if(ok===false){ history.pushState(null,'','#/'+view); return; }
@@ -73,7 +75,7 @@ async function show(name){
 }
 window.addEventListener('popstate', ()=>show((location.hash.match(/^#\/(\w+)/)||[])[1]||'home'));
 $('#btnBack').addEventListener('click', ()=>{ if(history.length>1 && view!=='home') history.back(); else go('home'); });
-$('#chipCurrent').addEventListener('click', ()=>go('library'));
+$('#chipCurrent').addEventListener('click', ()=>go(Classe.role()==='eleve' ? 'epar' : 'library'));
 document.addEventListener('click', e=>{
   const g = e.target.closest('[data-go]'); if(g){ go(g.dataset.go); return; }
   const a = e.target.closest('[data-action]'); if(a && actions[a.dataset.action]) actions[a.dataset.action](a);
@@ -89,16 +91,6 @@ function updateChrome(){
 /* =========================================================
    ACCUEIL
    ========================================================= */
-enterHooks.home = ()=>{
-  $('#homeCurName').textContent = cur.name;
-  $('#homeCurSummary').textContent = `${cur.n} longueurs (${cur.n*25} m) · ${Store.summary(cur)}`;
-  requestAnimationFrame(()=>Schema.render($('#homeSchema'), cur, {theme:'dark'}));
-  const L = Store.library();
-  $('#tileLibCount').textContent = `${L.user.length} enregistré${L.user.length>1?'s':''} · ${L.builtins.length} modèles`;
-  const nr = Store.results().length;
-  $('#tileResCount').textContent = nr ? `${nr} passage${nr>1?'s':''} enregistré${nr>1?'s':''}` : 'Aucun passage pour l’instant';
-};
-
 /* =========================================================
    BIBLIOTHÈQUE
    ========================================================= */
@@ -191,11 +183,11 @@ $('#fileImport').addEventListener('change', async e=>{
    ÉDITEUR
    ========================================================= */
 const Editor = (function(){
-  let draft=null, dirty=false, isNew=false;
+  let draft=null, dirty=false, isNew=false, onSave=null;
   const T = Store.TYPES;
 
   function open(p, opts={}){
-    draft = Store.clone(p); isNew = !!opts.isNew; dirty = !!opts.isNew && Store.countObstacles(draft)>0;
+    draft = Store.clone(p); isNew = !!opts.isNew; dirty = !!opts.isNew && Store.countObstacles(draft)>0; onSave = opts.onSave || null;
     $('#edName').value = draft.name;
     renderAll();
     go('editor');
@@ -336,9 +328,10 @@ const Editor = (function(){
     draft.obstacles.forEach(a=>a.sort((x,y)=>x.dist-y.dist));
     const saved = Store.normalize(Store.saveToLibrary(draft));
     dirty=false;
+    if(onSave){ const cb=onSave; onSave=null; toast('Parcours enregistré'); cb(saved); return; }
     const switched = await switchCurrent(saved);
     if(switched===false) toast('Parcours enregistré');
-    go('home', true);
+    go('library', true);
   });
   $('#edCancel').addEventListener('click', ()=>history.back());
 
@@ -408,56 +401,141 @@ const Editor = (function(){
    ========================================================= */
 const ChronoUI = (function(){
   let s = null;           // session
-  let timer = null, lastTap = 0, wakeLock = null;
+  let timer = null, lastTap = 0, wakeLock = null, ctx = null;
   const clock = $('#chronoClock'), tapBtn = $('#tapBtn');
 
-  function ensureSession(){
-    s = s || Store.chronoSession();
-    if(s && s.parcours && (s.parcours.id!==cur.id || JSON.stringify(s.parcours.obstacles)!==JSON.stringify(cur.obstacles) || s.parcours.n!==cur.n)){
-      if(!s.taps.length){ s = null; } // parcours changé sans passage commencé
+  /* ---- contexte de leçon (classe, élèves, piliers, parcours du jour) ---- */
+  function sameParcours(a, b){ return a && b && a.id===b.id && JSON.stringify(a.obstacles)===JSON.stringify(b.obstacles) && a.n===b.n && a.entree===b.entree; }
+  function newSess(p, keep){
+    const n = Chrono.newSession(p, {timeObstacles: keep && keep.timeObstacles!=null ? keep.timeObstacles : Store.settings().timeObstacles, student: keep && keep.student});
+    if(ctx){
+      const k = keep && keep.ctx || {};
+      const pilId = k.pil !== undefined ? k.pil : (ctx.piliers[0] ? ctx.piliers[0].id : null);
+      n.ctx = { cid:ctx.cid, n:ctx.n, sid:k.sid||null, disp:k.disp||'', pil: ctx.piliers.some(x=>x.id===pilId) ? pilId : null };
+      n.ob = []; n.obSel = null;
     }
-    if(!s) s = Chrono.newSession(cur, {timeObstacles: Store.settings().timeObstacles});
+    return n;
+  }
+  function ensureSession(){
+    ctx = Classe.context();
+    if(ctx && ctx.parcours.length && !ctx.parcours.some(p=>sameParcours(p, cur))) setCurrent(ctx.parcours[0], true);
+    s = s || Store.chronoSession();
+    if(s && s.taps.length && !sameParcours(s.parcours, cur)) setCurrent(s.parcours, true);
+    if(s){
+      const ctxOk = ctx ? (s.ctx && s.ctx.cid===ctx.cid && s.ctx.n===ctx.n) : !s.ctx;
+      const parOk = sameParcours(s.parcours, cur);
+      if((!ctxOk || !parOk) && !s.taps.length) s = null;
+    }
+    if(!s) s = newSess(cur, null);
     persist();
   }
   function persist(){ Store.saveChronoSession(s); }
+  const pil = ()=> (ctx && s && s.ctx && s.ctx.pil) ? ctx.piliers.find(p=>p.id===s.ctx.pil) : null;
+
+  /* ---- carte « passage » (parcours, pilier observé, nageur) ---- */
+  function renderPassage(){
+    const free = !ctx;
+    $('#stFree').hidden = !free;
+    $('#stCtx').hidden = free;
+    if(free) return;
+    const locked = s.taps.length>0;
+    const pars = ctx.parcours.length ? ctx.parcours : [cur];
+    $('#stCtx').innerHTML = `
+      <div class="pass-grid">
+        <label class="field"><span class="field-lbl">Parcours</span>
+          <select id="ctxPar" ${locked?'disabled':''}>${pars.map(p=>`<option value="${esc(p.id)}" ${p.id===cur.id?'selected':''}>${esc(p.name)} · ${p.n*25} m</option>`).join('')}</select></label>
+        <label class="field"><span class="field-lbl">Pilier observé</span>
+          <select id="ctxPil">${ctx.piliers.map(p=>`<option value="${esc(p.id)}" ${s.ctx.pil===p.id?'selected':''}>${esc(p.n)}</option>`).join('')}<option value="" ${!s.ctx.pil?'selected':''}>Pas d’observation</option></select></label>
+      </div>
+      <button class="swimmer-btn ${s.ctx.sid?'':'empty'}" id="ctxSwimmer" type="button">
+        <span class="field-lbl">Nageur</span><b>${s.ctx.sid ? esc(s.ctx.disp) : 'Choisir le nageur…'}</b>
+        <span class="muted small">${esc(ctx.cn)} · Leçon ${ctx.n}</span></button>`;
+    $('#ctxPar').onchange = e=>{
+      const p = pars.find(x=>x.id===e.target.value); if(!p || s.taps.length) return;
+      setCurrent(p, true); s = newSess(cur, s); persist(); render();
+    };
+    $('#ctxPil').onchange = e=>{ s.ctx.pil = e.target.value || null; s.ob=[]; s.obSel=null; s.saved=false; persist(); render(); };
+    $('#ctxSwimmer').onclick = pickSwimmer;
+  }
+  function pickSwimmer(){
+    const ov = document.createElement('div'); ov.className='overlay';
+    ov.innerHTML = `<div class="overlay-box"><div class="overlay-head"><h3>Qui nage ?</h3><button class="iconbtn" data-x aria-label="Fermer"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="pick-grid">${ctx.students.map(st=>`<button type="button" class="pick ${st.att?'att-'+st.att:''} ${s.ctx.sid===st.id?'on':''}" data-sid="${esc(st.id)}" ${st.att?'disabled':''}>
+        ${esc(st.disp)}${st.att?`<small>${st.att==='abs'?'Absent':'Inapte'}</small>`:''}</button>`).join('')}</div></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e=>{
+      if(e.target===ov || e.target.closest('[data-x]')){ ov.remove(); return; }
+      const b = e.target.closest('[data-sid]'); if(!b) return;
+      const st = ctx.students.find(x=>x.id===b.dataset.sid);
+      s.ctx.sid = st.id; s.ctx.disp = st.disp; s.saved=false; persist(); ov.remove(); render();
+    });
+  }
+
+  /* ---- observation : 3 critères du pilier, oui / non, une fois par longueur ---- */
+  function curLen(c){ return c.next ? (c.next.kind==='start' ? 0 : c.next.li) : s.parcours.n-1; }
+  function renderObs(c){
+    const card = $('#obsCard');
+    const P = pil();
+    card.hidden = !P;
+    if(!P) return;
+    const auto = curLen(c);
+    if(s.obAuto!==auto){ s.obAuto=auto; s.obSel=null; }
+    const li = s.obSel!=null ? s.obSel : auto;
+    const n = s.parcours.n;
+    const filled = (i)=>[0,1,2].filter(k=>(s.ob[i]||[])[k]===1||(s.ob[i]||[])[k]===0).length;
+    card.innerHTML = `<div class="obs-top"><div><div class="eyebrow">Observation · une fois par longueur</div><b>${esc(P.n)}</b></div></div>
+      <div class="obs-tabs">${Array.from({length:n},(_,i)=>`<button type="button" class="${i===li?'on':''} ${filled(i)===3?'full':''}" data-li="${i}">${esc(Store.lenLabel(i))}${filled(i)?` <small>${filled(i)}/3</small>`:''}</button>`).join('')}</div>
+      ${P.cr.map((x,k)=>{ const v=(s.ob[li]||[])[k];
+        return `<div class="ob-row"><div class="ob-txt"><b>${esc(x.t)}</b><span>${esc(x.o)}</span></div>
+          <div class="ob-btns"><button type="button" class="yes ${v===1?'on':''}" data-k="${k}" data-v="1">Oui</button><button type="button" class="no ${v===0?'on':''}" data-k="${k}" data-v="0">Non</button></div></div>`; }).join('')}`;
+    card.onclick = e=>{
+      const t = e.target.closest('[data-li]');
+      if(t){ s.obSel = +t.dataset.li; persist(); renderObs(Chrono.compute(s)); return; }
+      const b = e.target.closest('[data-v]'); if(!b) return;
+      const k=+b.dataset.k, v=+b.dataset.v;
+      s.ob[li] = s.ob[li] || [null,null,null];
+      s.ob[li][k] = s.ob[li][k]===v ? null : v;
+      s.saved=false; vibrate(15); persist(); renderObs(Chrono.compute(s)); renderFinish(Chrono.compute(s));
+    };
+  }
+
+  function renderFinish(c){
+    $('#finishCard').hidden = !c.finished;
+    if(!c.finished) return;
+    $('#finishTime').textContent = Chrono.fmt(c.total) + (s.faults ? `  ·  ${s.faults} faute${s.faults>1?'s':''}` : '');
+    const b = $('#btnSaveResult');
+    b.disabled = !!s.saved;
+    b.innerHTML = s.saved ? '<svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>Passage enregistré' : '<svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>Enregistrer le passage';
+    $('#btnNextStudent').textContent = ctx ? 'Nageur suivant →' : 'Élève suivant →';
+    $('#btnResultPng').hidden = !!ctx;
+  }
 
   function render(){
     if(!s) return;
     const c = Chrono.compute(s);
-    // horloge
+    renderPassage();
     clock.textContent = Chrono.fmt(c.elapsed);
     clock.classList.toggle('idle', !c.started);
     clock.classList.toggle('done', c.finished);
-    // bouton principal
     tapBtn.className = 'tapbtn' + (c.next ? ' k-'+c.next.kind : '');
     tapBtn.disabled = c.finished;
     $('#tapLabel').textContent = c.next ? c.next.label : 'Terminé';
     $('#tapSub').textContent = c.next ? c.next.sub : `Temps final ${Chrono.fmt(c.total)}`;
-    // outils
     $('#faultCount').textContent = s.faults;
     $('#faultMinus').disabled = s.faults<=0;
     $('#tapUndo').disabled = !s.taps.length;
     $('#chronoReset').disabled = !s.taps.length && !s.faults;
     $('#optTimeObs').checked = s.timeObstacles;
     $('#optTimeObs').disabled = !!s.taps.length;
-    // fin
-    $('#finishCard').hidden = !c.finished;
-    if(c.finished){
-      $('#finishTime').textContent = Chrono.fmt(c.total) + (s.faults ? `  ·  ${s.faults} faute${s.faults>1?'s':''}` : '');
-      const b = $('#btnSaveResult');
-      b.disabled = !!s.saved;
-      b.innerHTML = s.saved ? '<svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>Passage enregistré' : '<svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>Enregistrer le passage';
-    }
-    // indicateurs
+    renderFinish(c);
+    renderObs(c);
     $('#kLen').textContent = c.lenTotal ? Chrono.fmt(c.lenTotal) : '—';
     $('#kObs').textContent = s.timeObstacles ? (c.obsTotal ? Chrono.fmt(c.obsTotal) : '—') : 'non chrono.';
     $('#kSwim').textContent = (s.timeObstacles && c.lenTotal) ? Chrono.fmt(c.swimTotal) : '—';
-    // schéma
     let doneUpTo = -1; c.lengths.forEach((l,i)=>{ if(l.dur!=null) doneUpTo=i; });
     const hl = c.next ? { li: c.next.kind==='start' ? 0 : c.next.li, obsId: c.next.obsId ?? null } : null;
     Schema.render($('#chronoSchema'), s.parcours, {theme:'dark', highlight:hl, doneUpTo});
     renderTimeline(c);
-    // horloge vivante
     const running = c.started && !c.finished;
     if(running && !timer) timer = setInterval(tick, 100);
     if(!running && timer){ clearInterval(timer); timer=null; }
@@ -484,6 +562,7 @@ const ChronoUI = (function(){
 
   function doTap(){
     if(!s) return;
+    if(ctx && !s.ctx.sid && !s.taps.length){ toast('Choisissez d’abord le nageur', true); pickSwimmer(); return; }
     const now = Date.now();
     if(now - lastTap < 350) return; // anti double-tap
     lastTap = now;
@@ -501,15 +580,15 @@ const ChronoUI = (function(){
   $('#faultPlus').addEventListener('click', ()=>{ s.faults++; s.saved=false; vibrate([20,40,20]); persist(); render(); });
   $('#faultMinus').addEventListener('click', ()=>{ s.faults=Math.max(0,s.faults-1); s.saved=false; persist(); render(); });
   $('#chronoReset').addEventListener('click', async ()=>{
-    if(s.taps.length && !s.saved && !await ask({title:'Réinitialiser le chrono ?', msg:'Les temps de ce passage seront effacés.', ok:'Réinitialiser', danger:true})) return;
-    s = Chrono.newSession(cur, {timeObstacles:s.timeObstacles, student:s.student}); persist(); render();
+    if(s.taps.length && !s.saved && !await ask({title:'Réinitialiser le chrono ?', msg:'Les temps et les observations de ce passage seront effacés.', ok:'Réinitialiser', danger:true})) return;
+    s = newSess(cur, s); persist(); render();
   });
   $('#optTimeObs').addEventListener('change', e=>{
     if(s.taps.length) return;
     s.timeObstacles = e.target.checked; Store.setSetting('timeObstacles', s.timeObstacles); persist(); render();
   });
 
-  // élève
+  // élève (mode libre, sans classe)
   const bind = (id, k)=>$(id).addEventListener('input', e=>{ s.student[k]=e.target.value; s.saved=false; persist(); });
   bind('#stNom','nom'); bind('#stPrenom','prenom'); bind('#stClasse','classe');
   function fillStudent(){
@@ -518,8 +597,27 @@ const ChronoUI = (function(){
     $('#classesList').innerHTML = classes.map(c=>`<option value="${esc(c)}">`).join('');
   }
 
+  function classResult(){
+    const base = Chrono.toResult(s);
+    return { id: Classe.deviceId()+'-'+Date.now().toString(36), ts: base.ts, d: Classe.deviceId(), cid: s.ctx.cid, n: s.ctx.n,
+      sid: s.ctx.sid, pid: s.parcours.id, pname: s.parcours.name, entree: Store.validEntree(s.parcours.entree), nL: s.parcours.n,
+      total: base.total, faults: base.faults, lens: base.lengths, obs: base.obstacles.map(o=>o.dur), pil: s.ctx.pil || null,
+      ob: Array.from({length:s.parcours.n}, (_,i)=>(s.ob[i]||[null,null,null]).slice(0,3)) };
+  }
   async function saveResult(){
     if(s.saved) return true;
+    if(ctx){
+      if(!s.ctx.sid){ toast('Choisissez le nageur', true); pickSwimmer(); return false; }
+      const P = pil();
+      if(P){
+        const missing = Array.from({length:s.parcours.n},(_,i)=>i).filter(i=>[0,1,2].some(k=>(s.ob[i]||[])[k]==null));
+        if(missing.length && !await ask({title:'Observation incomplète', msg:`Critères non renseignés pour : ${missing.map(i=>Store.lenLabel(i)).join(', ')}.\nEnregistrer quand même ?`, ok:'Enregistrer', cancel:'Compléter'})) return false;
+      }
+      Classe.addResult(classResult());
+      s.saved = true; persist(); render();
+      toast(`Passage de ${s.ctx.disp} enregistré`);
+      return true;
+    }
     if(!(s.student.nom||'').trim() && !(s.student.prenom||'').trim()){
       const name = await ask({title:'Nom de l’élève', msg:'Saisissez le NOM et le prénom (ou laissez vide pour enregistrer sans nom).', input:true, ok:'Enregistrer'});
       if(name===null) return false;
@@ -529,24 +627,29 @@ const ChronoUI = (function(){
     }
     Store.addResult(Chrono.toResult(s));
     s.saved = true; persist(); render();
-    toast('Passage enregistré dans Résultats');
+    toast('Passage enregistré dans Passages libres');
     return true;
   }
   $('#btnSaveResult').addEventListener('click', saveResult);
   $('#btnResultPng').addEventListener('click', ()=>Exporter.resultPng(Chrono.toResult(s)));
   $('#btnNextStudent').addEventListener('click', async ()=>{
     if(!s.saved){
-      const ok = await ask({title:'Passage non enregistré', msg:'Enregistrer ce passage avant de passer à l’élève suivant ?', ok:'Enregistrer', cancel:'Ne pas enregistrer'});
+      const ok = await ask({title:'Passage non enregistré', msg:'Enregistrer ce passage avant de passer au suivant ?', ok:'Enregistrer', cancel:'Ne pas enregistrer'});
       if(ok && !await saveResult()) return;
     }
-    s = Chrono.newSession(cur, {timeObstacles:s.timeObstacles, student:{classe:s.student.classe}});
-    persist(); fillStudent(); render();
-    $('#stNom').focus();
+    if(ctx){
+      s = newSess(cur, {timeObstacles:s.timeObstacles, ctx:{pil:s.ctx.pil}});
+      persist(); render(); pickSwimmer();
+    }else{
+      s = Chrono.newSession(cur, {timeObstacles:s.timeObstacles, student:{classe:s.student.classe}});
+      persist(); fillStudent(); render();
+      $('#stNom').focus();
+    }
   });
 
   // clavier / télécommande de présentation
   document.addEventListener('keydown', e=>{
-    if(view!=='chrono' || e.target.matches('input,select,textarea') || $('#dlg').open) return;
+    if(view!=='chrono' || e.target.matches('input,select,textarea') || $('#dlg').open || document.querySelector('.overlay')) return;
     if(['Space','Enter','NumpadEnter','PageDown','ArrowRight','ArrowDown'].includes(e.code)){ e.preventDefault(); doTap(); }
     else if(['PageUp','ArrowLeft','Backspace'].includes(e.code)){ e.preventDefault(); $('#tapUndo').click(); }
     else if(e.key==='f' || e.key==='F'){ $('#faultPlus').click(); }
@@ -557,8 +660,9 @@ const ChronoUI = (function(){
   }
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && view==='chrono') lockScreen(); });
 
-  enterHooks.chrono = ()=>{ ensureSession(); fillStudent(); requestAnimationFrame(render); lockScreen(); };
-  leaveHooks.chrono = ()=>{ if(timer){ clearInterval(timer); timer=null; } try{ wakeLock && wakeLock.release(); }catch(e){} wakeLock=null; return true; };
+  enterHooks.chrono = ()=>{ ensureSession(); fillStudent(); requestAnimationFrame(render); lockScreen();
+    if(ctx && !s.ctx.sid && !s.taps.length) setTimeout(pickSwimmer, 250); };
+  leaveHooks.chrono = ()=>{ if(timer){ clearInterval(timer); timer=null; } try{ wakeLock && wakeLock.release(); }catch(e){} wakeLock=null; document.querySelectorAll('.overlay').forEach(o=>o.remove()); return true; };
   window.addEventListener('resize', ()=>{ if(view==='chrono') render(); });
 
   return { drop(){ s=null; } };
@@ -613,11 +717,15 @@ const ChronoUI = (function(){
   enterHooks.results = render;
 })();
 
-/* ---------- Démarrage ---------- */
-updateChrome();
-const start = (location.hash.match(/^#\/(\w+)/)||[])[1];
-history.replaceState(null,'','#/home');
-show('home');
-if(start && start!=='home' && start!=='editor' && TITLES[start]) go(start);
+/* ---------- Démarrage (appelé par modes.js une fois les écrans enregistrés) ---------- */
+function start(){
+  updateChrome();
+  const st = (location.hash.match(/^#\/(\w+)/)||[])[1];
+  history.replaceState(null,'','#/home');
+  show('home');
+  if(st && st!=='home' && st!=='editor' && TITLES[st]) go(st);
+}
+Object.assign(App, { $, $$, esc, toast, ask, go, show, TITLES, enterHooks, leaveHooks, actions, Editor, ChronoUI,
+  setCurrent, switchCurrent, cur:()=>cur, view:()=>view, renderLibrary, start, pairColor });
 
 })();
