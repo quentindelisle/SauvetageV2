@@ -40,6 +40,7 @@ Object.entries(VIEWS).forEach(([k,t])=>{
   main.appendChild(sec);
 });
 const V = (k)=>$('#v-'+k);
+const PCOL = ['#0088E8','#E8403B','#3A9A1E','#7B4BD8','#F59A1B','#0E9AA7','#C2185B','#5B6478'];
 
 /* Accès selon le rôle de l'appareil */
 const ELEVE_OK = ['home','view','chrono','epil','epar','escan','esend'];
@@ -339,10 +340,19 @@ function renderLesson(){
       <p>Chaque élève nage <b>${L.tdist} m</b> sans obstacle (départ : ${esc(Store.ENTREES[L.tent].label.toLowerCase())}). Sa vitesse devient sa <b>vitesse de nage de sauveteur</b>, reprise sur les parcours des leçons suivantes.</p>
       <button class="btn ghost sm" data-act="go:pprog">Modifier dans la programmation</button></div>` : `<div class="card"><div class="row"><h3 class="grow">Parcours du jour</h3>
       <button class="btn ghost" data-act="addParcours">${I.plus}Parcours existant</button><button class="btn blue" data-act="createParcours">${I.plus}Créer un parcours</button></div>
-      ${L.par.length ? `<div class="grid-cards">${L.par.map(p=>`<article class="pcard"><div class="pcard-head"><div><div class="pcard-name">${esc(p.name)}</div>
-          <div class="muted small">${p.n} longueurs · ${esc(Store.summary(p))}</div></div></div><canvas class="schema" data-pid="${esc(p.id)}"></canvas>
+      <p class="muted small">Ajoutez autant de parcours que nécessaire : chaque élève peut avoir le sien (ci-dessous), ou le choisir lui-même.</p>
+      ${L.par.length ? `<div class="grid-cards">${L.par.map((p,i)=>`<article class="pcard" style="--pc:${PCOL[i%PCOL.length]}"><div class="pcard-head"><div><div class="pcard-name"><span class="pnum">P${i+1}</span> ${esc(p.name)}</div>
+          <div class="muted small">${p.n} longueurs · ${esc(Store.summary(p))}</div>
+          <div class="small"><b>${S.filter(x=>L.asg[x.id]===p.id).length}</b> élève(s) attribué(s)</div></div></div><canvas class="schema" data-pid="${esc(p.id)}"></canvas>
           <div class="btnrow"><button class="btn teal" data-act="viewPar" data-pid="${esc(p.id)}">${I.play}Voir</button><button class="btn ghost danger" data-act="rmPar" data-pid="${esc(p.id)}">Retirer</button></div></article>`).join('')}</div>`
-        : '<div class="empty">Aucun parcours pour cette leçon.</div>'}</div>`}
+        : '<div class="empty">Aucun parcours pour cette leçon.</div>'}</div>
+    ${L.par.length>1 && S.length ? `<div class="card asg-card"><div class="row"><div class="grow"><h3>🧭 Qui fait quel parcours ?</h3>
+        <p class="muted small">Touchez un numéro pour attribuer un parcours à l’élève. « Au choix » : l’élève choisit sur la tablette. Au chrono, le parcours de l’élève se sélectionne tout seul.</p></div></div>
+      <div class="asg-all"><span class="field-lbl">Tout le monde :</span><button type="button" class="asg-b" data-act="asgAll" data-pid="">Au choix</button>${L.par.map((p,i)=>`<button type="button" class="asg-b" style="--pc:${PCOL[i%PCOL.length]}" data-act="asgAll" data-pid="${esc(p.id)}">P${i+1}</button>`).join('')}</div>
+      <div class="asg-grid">${S.map(st=>{ const a=L.asg[st.id]||'';
+        return `<div class="asg ${L.att[st.id]?'is-'+L.att[st.id]:''}"><b>${esc(st.disp)}</b><div class="asg-btns">
+          <button type="button" class="asg-b ${!a?'on':''}" data-act="asg" data-sid="${st.id}" data-pid="">Au choix</button>
+          ${L.par.map((p,i)=>`<button type="button" class="asg-b ${a===p.id?'on':''}" style="--pc:${PCOL[i%PCOL.length]}" data-act="asg" data-sid="${st.id}" data-pid="${esc(p.id)}" title="${esc(p.name)}">P${i+1}</button>`).join('')}</div></div>`; }).join('')}</div></div>` : ''}`}
     <div class="card qr-card"><div class="row"><div class="grow"><h3>QR de la leçon</h3>
       <p class="muted small">À faire scanner par chaque tablette élève (« Scanner les infos du cours ») : classe et appel (Prénom N.), pilier(s) et leurs critères, parcours du jour.</p></div>
       <button class="btn orange lg" data-act="showSeanceQR">${I.qr}Afficher le QR</button><button class="btn ghost" data-act="fileSeance">${I.file}Partager en fichier</button></div></div>`;
@@ -357,16 +367,19 @@ async function showSeanceQR(c, n){
   await QR.showPacket(pkt, 'S', o.body.querySelector('#qrSeance'), '');
 }
 Object.assign(ACT, {
+  asg(b){ const c=Classe.active(); Classe.setAsg(c, c.cur, b.dataset.sid, b.dataset.pid||null); App.ChronoUI.drop(); renderLesson(); },
+  asgAll(b){ const c=Classe.active(); Classe.students(c).forEach(st=>Classe.setAsg(c, c.cur, st.id, b.dataset.pid||null)); App.ChronoUI.drop(); renderLesson(); },
   att(b){ const c=Classe.active(); Classe.setAtt(c, c.cur, b.dataset.sid, b.dataset.v); App.ChronoUI.drop(); renderLesson(); },
   addParcours(){
     const c=Classe.active(), n=c.cur, Lb=Store.library();
     let tab = Lb.user.length ? 'user' : 'model', q='';
-    const o=overlay('🗺️ Choisir les parcours du jour', `<div class="pp-bar"><div class="seg"><button type="button" data-tab="user">Mes parcours (${Lb.user.length})</button><button type="button" data-tab="model">Modèles (${Lb.builtins.length})</button></div>
+    const o=overlay('🗺️ Choisir les parcours du jour', `<p class="pp-hint">Touchez les parcours pour les <b>ajouter ou les retirer</b> : vous pouvez en sélectionner plusieurs. <span class="pp-count"></span></p><div class="pp-bar"><div class="seg"><button type="button" data-tab="user">Mes parcours (${Lb.user.length})</button><button type="button" data-tab="model">Modèles (${Lb.builtins.length})</button></div>
         <input type="search" placeholder="Rechercher…" class="pp-q"></div><div class="par-grid pp-grid"></div>
       <div class="btnrow end"><button type="button" class="btn primary lg" data-done>Terminé</button></div>`, 'wide');
     const grid=o.el.querySelector('.pp-grid');
     const draw=()=>{
       const L=Classe.lesson(c,n);
+      o.el.querySelector('.pp-count').innerHTML = `<b>${L.par.length}</b> sélectionné(s)${L.par.length?' : '+L.par.map((p,i)=>`P${i+1} ${esc(p.name)}`).join(' · '):''}`;
       o.el.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('on', b.dataset.tab===tab));
       const list=(tab==='user'?Lb.user:Lb.builtins).filter(p=>!q || (p.name+' '+Store.summary(p)).toLowerCase().includes(q));
       grid.innerHTML = list.length ? list.map(p=>{ const on=L.par.some(x=>x.id===p.id);
@@ -725,10 +738,12 @@ enterHooks.epil = ()=>{
 /* ---------- ÉLÈVE · Parcours du jour ---------- */
 enterHooks.epar = ()=>{
   const s=Classe.seance(); if(!s) return go('home', true);
-  V('epar').innerHTML = s.pars.length ? `<div class="grid-cards">${s.pars.map(p=>`<article class="pcard"><div class="pcard-head"><div><div class="pcard-name">${esc(p.name)}</div>
-      <div class="muted small">${p.n} longueurs (${p.n*25} m) · ${esc(Store.summary(p))}</div></div></div>
+  V('epar').innerHTML = s.pars.length ? `<div class="grid-cards">${s.pars.map((p,i)=>{ const who=s.st.filter(x=>x.pid===p.id).map(x=>x.disp);
+      return `<article class="pcard" style="--pc:${PCOL[i%PCOL.length]}"><div class="pcard-head"><div><div class="pcard-name"><span class="pnum">P${i+1}</span> ${esc(p.name)}</div>
+      <div class="muted small">${p.n} longueurs (${p.n*25} m) · ${esc(Store.summary(p))}</div>
+      <div class="par-who">👥 ${who.length ? esc(who.join(', ')) : 'au choix'}</div></div></div>
       <canvas class="schema" data-pid="${esc(p.id)}"></canvas>
-      <div class="btnrow"><button class="btn teal" data-act="eView" data-pid="${esc(p.id)}">${I.play}Voir l’animation</button><button class="btn red" data-act="eChrono" data-pid="${esc(p.id)}">${I.chrono}Chronométrer</button></div></article>`).join('')}</div>`
+      <div class="btnrow"><button class="btn teal" data-act="eView" data-pid="${esc(p.id)}">${I.play}Voir l’animation</button><button class="btn red" data-act="eChrono" data-pid="${esc(p.id)}">${I.chrono}Chronométrer</button></div></article>`; }).join('')}</div>`
     : '<div class="empty">Pas de parcours pour cette leçon.</div>';
   requestAnimationFrame(()=>$$('#v-epar canvas[data-pid]').forEach(cv=>{ const p=s.pars.find(x=>x.id===cv.dataset.pid); if(p) Schema.render(cv, p, {theme:'light'}); }));
 };

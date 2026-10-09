@@ -114,7 +114,7 @@ function renameClass(id, name){ const c=R.classes[id]; if(c){ c.name=String(name
 function deleteClass(id){ delete R.classes[id]; if(R.active===id) R.active=Object.keys(R.classes)[0]||null; save(); }
 function lesson(c, n){
   c.lessons[n] = c.lessons[n] || { kind:'parcours', pil:[], obj:'', par:[], att:{}, date:'' };
-  const L = c.lessons[n]; L.pil=L.pil||[]; L.par=L.par||[]; L.att=L.att||{};
+  const L = c.lessons[n]; L.pil=L.pil||[]; L.par=L.par||[]; L.att=L.att||{}; L.asg=L.asg||{};
   L.kind = L.kind==='test' ? 'test' : 'parcours'; L.tdist = L.tdist || 50; L.tent = Store.validEntree(L.tent || 'dive');
   return L;
 }
@@ -209,7 +209,10 @@ function addParcours(c, n, p){
   if(L.par.some(x=>x.id===snap.id)) L.par = L.par.map(x=>x.id===snap.id?snap:x); else L.par.push(snap);
   save();
 }
-function removeParcours(c, n, pid){ const L=lesson(c,n); L.par=L.par.filter(x=>x.id!==pid); save(); }
+function removeParcours(c, n, pid){ const L=lesson(c,n); L.par=L.par.filter(x=>x.id!==pid); Object.keys(L.asg).forEach(k=>{ if(L.asg[k]===pid) delete L.asg[k]; }); save(); }
+/* parcours attribué à un élève pour la leçon (différenciation) — null = au choix */
+function setAsg(c, n, sid, pid){ const L=lesson(c,n); if(pid && L.par.some(p=>p.id===pid)) L.asg[sid]=pid; else delete L.asg[sid]; save(); }
+const asgOf = (c, n, sid)=>{ const L=lesson(c,n), pid=L.asg[sid]; return pid && L.par.some(p=>p.id===pid) ? pid : null; };
 
 /* ---------- Test de vitesse (S1) et vitesse de nage de sauveteur ----------
    La première leçon de chaque séquence est un test : l'élève nage une distance sans obstacle,
@@ -260,7 +263,7 @@ function context(){
     const L=lesson(c, c.cur);
     const att=(sid)=>L.att[sid]||null;
     const test = L.kind==='test';
-    return { mode:'prof', cid:c.id, cn:c.name, n:c.cur, students:students(c).map(s=>({id:s.id, disp:s.disp, att:att(s.id), vref:(refSpeed(c, s.id, c.cur)||{}).v||null})),
+    return { mode:'prof', cid:c.id, cn:c.name, n:c.cur, students:students(c).map(s=>({id:s.id, disp:s.disp, att:att(s.id), vref:(refSpeed(c, s.id, c.cur)||{}).v||null, pid: test ? null : asgOf(c, c.cur, s.id)})),
       piliers:L.pil.map(pilier).filter(Boolean).map(pilSnap), parcours: test ? [testParcours(L.tdist, L.tent)] : L.par, obj:L.obj, test, tdist:L.tdist };
   }
   return null;
@@ -296,7 +299,7 @@ function unpackParcours(a){
 /** QR « Séance » : tout ce dont une tablette élève a besoin pour la leçon */
 function buildSeance(c, n){
   const L=lesson(c,n);
-  const st=students(c).map(s=>{ const rs=refSpeed(c, s.id, L.kind==='test' ? n-1 : n); return [s.id, s.disp, L.att[s.id]==='abs'?1:(L.att[s.id]==='inap'?2:0), rs ? Math.round(rs.v*100) : 0]; });
+  const st=students(c).map(s=>{ const rs=refSpeed(c, s.id, L.kind==='test' ? n-1 : n); const a=asgOf(c,n,s.id); return [s.id, s.disp, L.att[s.id]==='abs'?1:(L.att[s.id]==='inap'?2:0), rs ? Math.round(rs.v*100) : 0, a ? L.par.findIndex(p=>p.id===a)+1 : 0]; });
   const pils=L.pil.map(pilier).filter(Boolean).map(p=>[p.id, p.n, p.c, p.cr.map(x=>[x.t,x.o])]);
   return { k:'S', v:1, cid:c.id, cn:c.name, n, nb:c.nb, pin:R.pin, obj:L.obj||'', kind:L.kind, tdist:L.tdist, tent:L.tent, pils, pars:L.kind==='test' ? [] : L.par.map(packParcours), st, at:Math.floor(Date.now()/1000) };
 }
@@ -307,8 +310,9 @@ function applySeance(p){
     cid:p.cid, cn:p.cn, n:p.n, nb:p.nb, obj:p.obj||'', at:p.at, kind:p.kind==='test'?'test':'parcours', tdist:p.tdist||50, tent:Store.validEntree(p.tent||'dive'),
     pils:(p.pils||[]).map(a=>({ id:a[0], n:a[1], c:a[2], cr:a[3].map(x=>({t:x[0], o:x[1]})) })),
     pars:(p.pars||[]).map(unpackParcours),
-    st:(p.st||[]).map(a=>({ id:a[0], disp:a[1], att:a[2]===1?'abs':(a[2]===2?'inap':null), vref:a[3] ? a[3]/100 : null })),
+    st:(p.st||[]).map(a=>({ id:a[0], disp:a[1], att:a[2]===1?'abs':(a[2]===2?'inap':null), vref:a[3] ? a[3]/100 : null, pi:a[4]||0 })),
   };
+  R.seance.st.forEach(x=>{ x.pid = x.pi && R.seance.pars[x.pi-1] ? R.seance.pars[x.pi-1].id : null; delete x.pi; });
   save();
   return R.seance;
 }
@@ -475,7 +479,7 @@ return {
   piliers, pilier, savePilier, deletePilier, resetPiliers, pilSnap, pilierOf,
   newClass, classes, active, setActive, renameClass, deleteClass, lesson, setNb, setCur,
   students, dispNames, parseText, parseFile, addStudents, removeStudent,
-  attOf, setAtt, addParcours, removeParcours,
+  attOf, setAtt, addParcours, removeParcours, setAsg, asgOf,
   context, addResult, deleteResult, mine, mineFor, resultsOf,
   buildSeance, buildResults, applyPacket, seance, markSent, sentAt,
   obsCount, lessonBilan, studentCycle, exportXlsx, backup, restore,

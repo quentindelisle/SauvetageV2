@@ -457,3 +457,20 @@ table.bt{border-collapse:collapse;width:100%;font-size:14px}
   .cycle{grid-template-columns:1fr} .card{border-color:#bbb;break-inside:avoid}
   .view:not(.active){display:none!important}
 }
+
+/* ---------- Différenciation : plusieurs parcours par leçon ---------- */
+.pnum{display:inline-block;min-width:34px;padding:1px 7px;border-radius:8px;background:var(--pc,var(--navy));color:#fff;font-weight:900;font-size:14px;text-align:center;margin-right:4px}
+.pcard[style*="--pc"]{border-top:6px solid var(--pc)}
+.par-who{display:block;font-size:13px;font-weight:700;color:var(--navy);margin-top:2px}
+.pp-hint{margin:0 0 10px;padding:8px 12px;border-radius:10px;background:var(--blue-l);border:2px solid var(--blue)}
+.pp-count{display:block;margin-top:4px;font-size:14px}
+.asg-card{border-color:var(--teal)}
+.asg-all{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0 10px}
+.asg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}
+.asg{padding:8px 10px;border-radius:12px;border:2px solid var(--line);background:#fff}
+.asg b{display:block;color:var(--navy);font-size:17px;margin-bottom:6px}
+.asg.is-abs{opacity:.55} .asg.is-inap{background:var(--orange-l)}
+.asg-btns{display:flex;flex-wrap:wrap;gap:5px}
+.asg-b{min-height:38px;min-width:44px;padding:4px 10px;border-radius:10px;border:2px solid var(--pc,var(--line2));background:#fff;color:var(--pc,var(--ink));font:900 14px var(--font);cursor:pointer}
+.asg-b.on{background:var(--pc,var(--navy));border-color:var(--pc,var(--navy));color:#fff}
+.pick-par{color:var(--teal)!important}

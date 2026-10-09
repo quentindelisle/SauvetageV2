@@ -434,6 +434,15 @@ const ChronoUI = (function(){
 
   /* ---- carte « passage » (parcours, pilier observé, nageur, observateur) ---- */
   const stu = (id)=>ctx && ctx.students.find(x=>x.id===id);
+  const parName = (pid)=>{ const p=ctx && ctx.parcours.find(x=>x.id===pid); return p ? p.name : ''; };
+  /* différenciation : le nageur fait le parcours que l'enseignant lui a attribué */
+  function followAsg(){
+    const st=stu(s.ctx.sid); if(!st || !st.pid || s.taps.length || st.pid===cur.id) return;
+    const p=ctx.parcours.find(x=>x.id===st.pid); if(!p) return;
+    setCurrent(p, true);
+    s = newSess(cur, {timeObstacles:s.timeObstacles, ctx:Object.assign({}, s.ctx)}); persist();
+    toast(`Parcours de ${st.disp} : ${p.name}`);
+  }
   function renderPassage(){
     const free = !ctx;
     $('#stFree').hidden = !free;
@@ -469,7 +478,8 @@ const ChronoUI = (function(){
     const ov = document.createElement('div'); ov.className='overlay';
     ov.innerHTML = `<div class="overlay-box wide"><div class="overlay-head"><h3>Quel parcours ?</h3><button class="iconbtn" data-x aria-label="Fermer"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <div class="par-grid">${pars.map(p=>`<button type="button" class="par-card ${p.id===cur.id?'on':''}" data-pid="${esc(p.id)}"><canvas class="schema"></canvas>
-        <b>${esc(p.name)}</b><span class="muted small">${p.n*25} m · ${esc(Store.ENTREES[Store.validEntree(p.entree)].label)} · ${esc(Store.summary(p).replace(/^[^·]*· ?/,''))}</span></button>`).join('')}</div></div>`;
+        <b>${esc(p.name)}</b><span class="muted small">${p.n*25} m · ${esc(Store.ENTREES[Store.validEntree(p.entree)].label)} · ${esc(Store.summary(p).replace(/^[^·]*· ?/,''))}</span>
+        ${(()=>{ const who=ctx.students.filter(x=>x.pid===p.id).map(x=>x.disp); return who.length ? `<span class="par-who">👥 ${esc(who.join(', '))}</span>` : ''; })()}</button>`).join('')}</div></div>`;
     document.body.appendChild(ov);
     requestAnimationFrame(()=>ov.querySelectorAll('.par-card').forEach((b,i)=>Schema.render(b.querySelector('canvas'), pars[i], {compact:true})));
     ov.addEventListener('click', e=>{
@@ -491,18 +501,18 @@ const ChronoUI = (function(){
       <div class="pick-grid">${ctx.students.map(st=>{
         const off = st.att==='abs' || (isSw && st.att==='inap') || st.id===other;
         return `<button type="button" class="pick ${st.att?'att-'+st.att:''} ${s.ctx[kind]===st.id?'on':''}" data-sid="${esc(st.id)}" ${off?'disabled':''}>
-          ${esc(st.disp)}${st.att?`<small>${st.att==='abs'?'Absent':'Inapte'}</small>`:(st.id===other?`<small>${isSw?'observe':'nage'}</small>`:'')}</button>`; }).join('')}</div></div>`;
+          ${esc(st.disp)}${st.att?`<small>${st.att==='abs'?'Absent':'Inapte'}</small>`:(st.id===other?`<small>${isSw?'observe':'nage'}</small>`:(isSw && st.pid?`<small class="pick-par">🗺️ ${esc(parName(st.pid))}</small>`:''))}</button>`; }).join('')}</div></div>`;
     document.body.appendChild(ov);
     ov.addEventListener('click', e=>{
       if(e.target===ov || e.target.closest('[data-x]')){ ov.remove(); return; }
       if(e.target.closest('[data-swap]')){
         const a=stu(prev.oid), b=stu(prev.sid);
-        Object.assign(s.ctx, {sid:a.id, disp:a.disp, oid:b.id, odisp:b.disp}); s.saved=false; persist(); ov.remove(); render(); return;
+        Object.assign(s.ctx, {sid:a.id, disp:a.disp, oid:b.id, odisp:b.disp}); s.saved=false; persist(); ov.remove(); followAsg(); render(); return;
       }
       const b = e.target.closest('[data-sid]'); if(!b) return;
       const st = stu(b.dataset.sid);
       if(isSw){ s.ctx.sid = st.id; s.ctx.disp = st.disp; } else { s.ctx.oid = st.id; s.ctx.odisp = st.disp; }
-      s.saved=false; persist(); ov.remove(); render();
+      s.saved=false; persist(); ov.remove(); if(isSw) followAsg(); render();
       if(isSw && !s.ctx.oid) setTimeout(()=>pickStudent('oid'), 150);
     });
   }
