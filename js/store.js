@@ -214,7 +214,7 @@ function chronoSession(){ return read(K.chrono, null); }
 function saveChronoSession(s){ s ? write(K.chrono, s) : localStorage.removeItem(K.chrono); }
 
 /* Réglages */
-const DEFAULT_SETTINGS = { timeObstacles:true, simSpeed:1 };
+const DEFAULT_SETTINGS = { timeObstacles:true, simSpeed:1, simStart:'dive' };
 function settings(){ return Object.assign({}, DEFAULT_SETTINGS, read(K.settings, {})); }
 function setSetting(k,v){ const s=settings(); s[k]=v; write(K.settings, s); }
 

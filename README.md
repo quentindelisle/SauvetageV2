@@ -10,7 +10,7 @@ index.html            Coquille de l'appli (6 écrans : accueil, parcours, édite
 css/app.css           Styles (variables de couleurs en tête de fichier)
 js/store.js           Modèle de données, types d'obstacles, modèles intégrés, stockage local, import/migration
 js/schema.js          Plan du parcours (toutes les longueurs) — éditeur, vignettes, chrono, fiche PNG
-js/sim.js             Animation vue de dessus / vue de côté (moteur repris de la V4c)
+js/sim.js             Animation vue de dessus / vue de côté : départ (plongeon, saut droit, dans l'eau), virage culbute, obstacles
 js/chrono.js          Logique de chronométrage (étapes, taps, annulation, calcul des temps)
 js/export.js          Export JSON (parcours), CSV (résultats), fiche PNG élève
 js/app.js             Navigation (#/home, #/library…) et interfaces
@@ -27,3 +27,4 @@ icons/                Icônes PWA
 - **Stockage** (localStorage, propre à chaque appareil) : `sca2.library`, `sca2.current`, `sca2.chrono`, `sca2.results`, `sca2.settings`.
 - **Compatibilité** : les fichiers `.json` exportés par la V4c s'importent tels quels ; les fichiers exportés par la V5 gardent le même format `data.nbLongueurs / data.obstacles`.
 - **Raccourcis chrono** (clavier ou télécommande de présentation Bluetooth) : Espace / Entrée / Page suivante = tap · Page précédente / ← = annuler · F = faute.
+- **Animation — entrée dans l'eau** : choix « Plongeon / Saut droit / Dans l'eau » dans la barre de visualisation (mémorisé dans `sca2.settings.simStart`). Les départs et le virage culbute sont des séquences de postures dans `js/sim.js` (`DIVE`, `JUMP`, `WATER`, `TURN`), suivies d'une coulée (`glideOut`).

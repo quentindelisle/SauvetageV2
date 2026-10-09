@@ -384,6 +384,14 @@ const Editor = (function(){
   function setSpeed(v){ Sim.setSpeed(v); Store.setSetting('simSpeed', v); speeds.forEach(b=>b.classList.toggle('on', +b.dataset.speed===v)); }
   speeds.forEach(b=>b.addEventListener('click', ()=>setSpeed(+b.dataset.speed)));
   setSpeed(Store.settings().simSpeed||1);
+  const starts = $$('#simStart button');
+  function setStart(m, apply){
+    if(apply!==false) Sim.setStart(m);
+    Store.setSetting('simStart', m);
+    starts.forEach(b=>b.classList.toggle('on', b.dataset.start===m));
+  }
+  starts.forEach(b=>b.addEventListener('click', ()=>setStart(b.dataset.start)));
+  setStart(Store.settings().simStart||'dive');
 
   enterHooks.view = ()=>{
     requestAnimationFrame(()=>{

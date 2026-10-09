@@ -1,6 +1,6 @@
 /* Service worker — Sauvetage CA2 (hors-ligne)
    Changer CACHE_VERSION à chaque mise en ligne d'une nouvelle version. */
-const CACHE_VERSION = 'sauvetage-ca2-v5.2.0';
+const CACHE_VERSION = 'sauvetage-ca2-v5.3.0';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css',

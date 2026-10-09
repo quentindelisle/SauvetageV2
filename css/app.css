@@ -151,6 +151,7 @@ input.upper{text-transform:uppercase}
 .seg button{min-height:46px;min-width:52px;border:0;background:transparent;color:var(--text);font:800 15px var(--font);cursor:pointer}
 .seg button+button{border-left:1px solid var(--line2)}
 .seg button.on{background:var(--blue)}
+.seg-text button{padding:0 12px;font-size:14px}
 .sim-status{flex:1 1 220px;display:flex;flex-direction:column;gap:6px;font-weight:800}
 .progress{height:8px;border-radius:99px;background:var(--card2);overflow:hidden}
 .progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--teal),var(--blue));transition:width .1s linear}
