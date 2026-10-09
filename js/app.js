@@ -137,7 +137,7 @@ function renderLibrary(){
   L.user.forEach(p=>u.appendChild(card(p)));
   L.builtins.forEach(p=>b.appendChild(card(p)));
   requestAnimationFrame(()=>{
-    $$('.pcard').forEach((el,i)=>{
+    $$('#libUser .pcard, #libBuiltin .pcard').forEach((el,i)=>{
       const p = i < L.user.length ? L.user[i] : L.builtins[i-L.user.length];
       Schema.render(el.querySelector('canvas'), p, {compact:true});
     });
@@ -201,7 +201,7 @@ const Editor = (function(){
     $('#edLenMeters').textContent = (draft.n*25)+' m';
     $('#edLenMinus').disabled = draft.n<=1;
     $('#edLenPlus').disabled = draft.n>=Store.MAX_LEN;
-    Schema.render($('#edSchema'), draft, {theme:'dark'});
+    Schema.render($('#edSchema'), draft, {theme:'light'});
     const w = Store.warnings(draft);
     $('#edWarnings').innerHTML = w.length ? w.map(x=>`<li>${esc(x)}</li>`).join('') : (Store.countObstacles(draft) ? '<li class="ok">Parcours cohérent.</li>' : '<li>Ajoutez des obstacles dans les longueurs.</li>');
   }
@@ -411,7 +411,7 @@ const ChronoUI = (function(){
     if(ctx){
       const k = keep && keep.ctx || {};
       const pilId = k.pil !== undefined ? k.pil : (ctx.piliers[0] ? ctx.piliers[0].id : null);
-      n.ctx = { cid:ctx.cid, n:ctx.n, sid:k.sid||null, disp:k.disp||'', pil: ctx.piliers.some(x=>x.id===pilId) ? pilId : null };
+      n.ctx = { cid:ctx.cid, n:ctx.n, sid:k.sid||null, disp:k.disp||'', oid:k.oid||null, odisp:k.odisp||'', pil: ctx.piliers.some(x=>x.id===pilId) ? pilId : null, prev:k.prev||null };
       n.ob = []; n.obSel = null;
     }
     return n;
@@ -432,7 +432,8 @@ const ChronoUI = (function(){
   function persist(){ Store.saveChronoSession(s); }
   const pil = ()=> (ctx && s && s.ctx && s.ctx.pil) ? ctx.piliers.find(p=>p.id===s.ctx.pil) : null;
 
-  /* ---- carte « passage » (parcours, pilier observé, nageur) ---- */
+  /* ---- carte « passage » (parcours, pilier observé, nageur, observateur) ---- */
+  const stu = (id)=>ctx && ctx.students.find(x=>x.id===id);
   function renderPassage(){
     const free = !ctx;
     $('#stFree').hidden = !free;
@@ -440,51 +441,87 @@ const ChronoUI = (function(){
     if(free) return;
     const locked = s.taps.length>0;
     const pars = ctx.parcours.length ? ctx.parcours : [cur];
+    const sw = stu(s.ctx.sid), vref = sw && sw.vref;
     $('#stCtx').innerHTML = `
-      <div class="pass-grid">
-        <label class="field"><span class="field-lbl">Parcours</span>
-          <select id="ctxPar" ${locked?'disabled':''}>${pars.map(p=>`<option value="${esc(p.id)}" ${p.id===cur.id?'selected':''}>${esc(p.name)} · ${p.n*25} m</option>`).join('')}</select></label>
-        <label class="field"><span class="field-lbl">Pilier observé</span>
-          <select id="ctxPil">${ctx.piliers.map(p=>`<option value="${esc(p.id)}" ${s.ctx.pil===p.id?'selected':''}>${esc(p.n)}</option>`).join('')}<option value="" ${!s.ctx.pil?'selected':''}>Pas d’observation</option></select></label>
+      ${ctx.test ? `<div class="test-banner">⏱️ <b>Test de vitesse de nage de sauveteur</b> · ${ctx.tdist} m sans obstacle</div>` : ''}
+      <button type="button" class="par-btn" id="ctxPar" ${locked||pars.length<2?'disabled':''}>
+        <canvas class="schema"></canvas>
+        <span class="par-info"><span class="field-lbl">Parcours</span><b>${esc(cur.name)}</b>
+          <span class="muted small">${cur.n*25} m · ${esc(Store.ENTREES[Store.validEntree(cur.entree)].label)}${pars.length>1 && !locked ? ' · toucher pour changer' : ''}</span></span></button>
+      <div class="duo">
+        <button class="swimmer-btn ${s.ctx.sid?'':'empty'}" id="ctxSwimmer" type="button" ${locked?'disabled':''}>
+          <span class="field-lbl">🏊 Nageur</span><b>${s.ctx.sid ? esc(s.ctx.disp) : 'Choisir…'}</b>
+          <span class="muted small">${vref ? `Vitesse de sauveteur : ${Classe.fmtSpeed(vref)}` : (ctx.test ? 'Test : sa vitesse sera mesurée' : 'Pas encore de vitesse de sauveteur')}</span></button>
+        <button class="swimmer-btn obs ${s.ctx.oid?'':'empty'}" id="ctxObserver" type="button">
+          <span class="field-lbl">👀 Observateur</span><b>${s.ctx.oid ? esc(s.ctx.odisp) : 'Choisir…'}</b>
+          <span class="muted small">Il observe et coche les critères</span></button>
       </div>
-      <button class="swimmer-btn ${s.ctx.sid?'':'empty'}" id="ctxSwimmer" type="button">
-        <span class="field-lbl">Nageur</span><b>${s.ctx.sid ? esc(s.ctx.disp) : 'Choisir le nageur…'}</b>
-        <span class="muted small">${esc(ctx.cn)} · Leçon ${ctx.n}</span></button>`;
-    $('#ctxPar').onchange = e=>{
-      const p = pars.find(x=>x.id===e.target.value); if(!p || s.taps.length) return;
-      setCurrent(p, true); s = newSess(cur, s); persist(); render();
-    };
-    $('#ctxPil').onchange = e=>{ s.ctx.pil = e.target.value || null; s.ob=[]; s.obSel=null; s.saved=false; persist(); render(); };
-    $('#ctxSwimmer').onclick = pickSwimmer;
+      ${ctx.piliers.length ? `<label class="field pil-sel"><span class="field-lbl">Pilier observé</span>
+          <select id="ctxPil">${ctx.piliers.map(p=>`<option value="${esc(p.id)}" ${s.ctx.pil===p.id?'selected':''}>${esc(p.n)}</option>`).join('')}<option value="" ${!s.ctx.pil?'selected':''}>Pas d’observation</option></select></label>` : ''}`;
+    requestAnimationFrame(()=>{ const cv=$('#ctxPar canvas'); if(cv) Schema.render(cv, cur, {compact:true}); });
+    $('#ctxPar').onclick = ()=>pickParcours(pars);
+    if($('#ctxPil')) $('#ctxPil').onchange = e=>{ s.ctx.pil = e.target.value || null; s.ob=[]; s.obSel=null; s.saved=false; persist(); render(); };
+    $('#ctxSwimmer').onclick = ()=>pickStudent('sid');
+    $('#ctxObserver').onclick = ()=>pickStudent('oid');
   }
-  function pickSwimmer(){
+  function pickParcours(pars){
+    if(s.taps.length) return;
     const ov = document.createElement('div'); ov.className='overlay';
-    ov.innerHTML = `<div class="overlay-box"><div class="overlay-head"><h3>Qui nage ?</h3><button class="iconbtn" data-x aria-label="Fermer"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-      <div class="pick-grid">${ctx.students.map(st=>`<button type="button" class="pick ${st.att?'att-'+st.att:''} ${s.ctx.sid===st.id?'on':''}" data-sid="${esc(st.id)}" ${st.att?'disabled':''}>
-        ${esc(st.disp)}${st.att?`<small>${st.att==='abs'?'Absent':'Inapte'}</small>`:''}</button>`).join('')}</div></div>`;
+    ov.innerHTML = `<div class="overlay-box wide"><div class="overlay-head"><h3>Quel parcours ?</h3><button class="iconbtn" data-x aria-label="Fermer"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="par-grid">${pars.map(p=>`<button type="button" class="par-card ${p.id===cur.id?'on':''}" data-pid="${esc(p.id)}"><canvas class="schema"></canvas>
+        <b>${esc(p.name)}</b><span class="muted small">${p.n*25} m · ${esc(Store.ENTREES[Store.validEntree(p.entree)].label)} · ${esc(Store.summary(p).replace(/^[^·]*· ?/,''))}</span></button>`).join('')}</div></div>`;
+    document.body.appendChild(ov);
+    requestAnimationFrame(()=>ov.querySelectorAll('.par-card').forEach((b,i)=>Schema.render(b.querySelector('canvas'), pars[i], {compact:true})));
+    ov.addEventListener('click', e=>{
+      if(e.target===ov || e.target.closest('[data-x]')){ ov.remove(); return; }
+      const b=e.target.closest('[data-pid]'); if(!b) return;
+      const p=pars.find(x=>x.id===b.dataset.pid); ov.remove();
+      if(p && p.id!==cur.id){ setCurrent(p, true); s = newSess(cur, s); persist(); render(); }
+    });
+  }
+  function pickStudent(kind){
+    const isSw = kind==='sid';
+    if(isSw && s.taps.length) return;
+    const other = isSw ? s.ctx.oid : s.ctx.sid;
+    const prev = s.ctx.prev;   // binôme du passage précédent : proposer d'inverser les rôles
+    const swap = isSw && prev && prev.oid && prev.sid && stu(prev.oid) && !stu(prev.oid).att;
+    const ov = document.createElement('div'); ov.className='overlay';
+    ov.innerHTML = `<div class="overlay-box"><div class="overlay-head"><h3>${isSw?'🏊 Qui nage ?':'👀 Qui observe ?'}</h3><button class="iconbtn" data-x aria-label="Fermer"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      ${swap ? `<div class="swap-row"><button type="button" class="btn orange lg" data-swap>↔ On inverse : ${esc(stu(prev.oid).disp)} nage, ${esc(stu(prev.sid).disp)} observe</button></div>` : ''}
+      <div class="pick-grid">${ctx.students.map(st=>{
+        const off = st.att==='abs' || (isSw && st.att==='inap') || st.id===other;
+        return `<button type="button" class="pick ${st.att?'att-'+st.att:''} ${s.ctx[kind]===st.id?'on':''}" data-sid="${esc(st.id)}" ${off?'disabled':''}>
+          ${esc(st.disp)}${st.att?`<small>${st.att==='abs'?'Absent':'Inapte'}</small>`:(st.id===other?`<small>${isSw?'observe':'nage'}</small>`:'')}</button>`; }).join('')}</div></div>`;
     document.body.appendChild(ov);
     ov.addEventListener('click', e=>{
       if(e.target===ov || e.target.closest('[data-x]')){ ov.remove(); return; }
+      if(e.target.closest('[data-swap]')){
+        const a=stu(prev.oid), b=stu(prev.sid);
+        Object.assign(s.ctx, {sid:a.id, disp:a.disp, oid:b.id, odisp:b.disp}); s.saved=false; persist(); ov.remove(); render(); return;
+      }
       const b = e.target.closest('[data-sid]'); if(!b) return;
-      const st = ctx.students.find(x=>x.id===b.dataset.sid);
-      s.ctx.sid = st.id; s.ctx.disp = st.disp; s.saved=false; persist(); ov.remove(); render();
+      const st = stu(b.dataset.sid);
+      if(isSw){ s.ctx.sid = st.id; s.ctx.disp = st.disp; } else { s.ctx.oid = st.id; s.ctx.odisp = st.disp; }
+      s.saved=false; persist(); ov.remove(); render();
+      if(isSw && !s.ctx.oid) setTimeout(()=>pickStudent('oid'), 150);
     });
   }
 
-  /* ---- observation : 3 critères du pilier, oui / non, une fois par longueur ---- */
+  /* ---- observation : 3 critères du pilier, oui / non, une fois par aller-retour ---- */
   function curLen(c){ return c.next ? (c.next.kind==='start' ? 0 : c.next.li) : s.parcours.n-1; }
+  const nP = ()=>Classe.nPairs(s.parcours.n);
+  function pairLabel(k){ const n=s.parcours.n; return 2*k+1 < n ? `Aller-retour ${k+1}` : `Aller ${k+1}`; }
   function renderObs(c){
     const card = $('#obsCard');
     const P = pil();
     card.hidden = !P;
     if(!P) return;
-    const auto = curLen(c);
+    const auto = Math.floor(curLen(c)/2);
     if(s.obAuto!==auto){ s.obAuto=auto; s.obSel=null; }
     const li = s.obSel!=null ? s.obSel : auto;
-    const n = s.parcours.n;
     const filled = (i)=>[0,1,2].filter(k=>(s.ob[i]||[])[k]===1||(s.ob[i]||[])[k]===0).length;
-    card.innerHTML = `<div class="obs-top"><div><div class="eyebrow">Observation · une fois par longueur</div><b>${esc(P.n)}</b></div></div>
-      <div class="obs-tabs">${Array.from({length:n},(_,i)=>`<button type="button" class="${i===li?'on':''} ${filled(i)===3?'full':''}" data-li="${i}">${esc(Store.lenLabel(i))}${filled(i)?` <small>${filled(i)}/3</small>`:''}</button>`).join('')}</div>
+    card.innerHTML = `<div class="obs-top"><div><div class="eyebrow">👀 Observation · une fois par aller-retour${s.ctx.odisp?` · par ${esc(s.ctx.odisp)}`:''}</div><b>${esc(P.n)}</b></div></div>
+      <div class="obs-tabs">${Array.from({length:nP()},(_,i)=>`<button type="button" class="${i===li?'on':''} ${filled(i)===3?'full':''}" data-li="${i}">${esc(pairLabel(i))}${filled(i)?` <small>${filled(i)}/3</small>`:''}</button>`).join('')}</div>
       ${P.cr.map((x,k)=>{ const v=(s.ob[li]||[])[k];
         return `<div class="ob-row"><div class="ob-txt"><b>${esc(x.t)}</b><span>${esc(x.o)}</span></div>
           <div class="ob-btns"><button type="button" class="yes ${v===1?'on':''}" data-k="${k}" data-v="1">Oui</button><button type="button" class="no ${v===0?'on':''}" data-k="${k}" data-v="0">Non</button></div></div>`; }).join('')}`;
@@ -503,6 +540,18 @@ const ChronoUI = (function(){
     $('#finishCard').hidden = !c.finished;
     if(!c.finished) return;
     $('#finishTime').textContent = Chrono.fmt(c.total) + (s.faults ? `  ·  ${s.faults} faute${s.faults>1?'s':''}` : '');
+    const sp = $('#finishSpeed');
+    if(ctx){
+      const w = swim(c), sw = stu(s.ctx.sid), vref = sw && sw.vref;
+      let h = '';
+      if(w.v){
+        if(ctx.test) h = `⏱️ Vitesse de nage de sauveteur : <b>${Classe.fmtSpeed(w.v)}</b>${vref && Math.abs(vref-w.v)>0.005 ? ` <span class="muted">(meilleure : ${Classe.fmtSpeed(Math.max(vref,w.v))})</span>`:''}`;
+        else if(vref){ const e = w.v/vref-1; const ok = Math.abs(e)<=0.10;
+          h = `🏊 Nage seule : <b>${Classe.fmtSpeed(w.v)}</b> · vitesse de sauveteur ${Classe.fmtSpeed(vref)} · <span class="spd ${ok?'ok':'ko'}">${e>=0?'+':''}${Math.round(e*100)} %${ok?' · vitesse stable 👍':''}</span>`; }
+        else h = `🏊 Nage seule : <b>${Classe.fmtSpeed(w.v)}</b> <span class="muted">(pas encore de test de vitesse)</span>`;
+      }
+      sp.innerHTML = h; sp.hidden = !h;
+    } else sp.hidden = true;
     const b = $('#btnSaveResult');
     b.disabled = !!s.saved;
     b.innerHTML = s.saved ? '<svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>Passage enregistré' : '<svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>Enregistrer le passage';
@@ -534,7 +583,7 @@ const ChronoUI = (function(){
     $('#kSwim').textContent = (s.timeObstacles && c.lenTotal) ? Chrono.fmt(c.swimTotal) : '—';
     let doneUpTo = -1; c.lengths.forEach((l,i)=>{ if(l.dur!=null) doneUpTo=i; });
     const hl = c.next ? { li: c.next.kind==='start' ? 0 : c.next.li, obsId: c.next.obsId ?? null } : null;
-    Schema.render($('#chronoSchema'), s.parcours, {theme:'dark', highlight:hl, doneUpTo});
+    Schema.render($('#chronoSchema'), s.parcours, {theme:'light', highlight:hl, doneUpTo});
     renderTimeline(c);
     const running = c.started && !c.finished;
     if(running && !timer) timer = setInterval(tick, 100);
@@ -562,7 +611,7 @@ const ChronoUI = (function(){
 
   function doTap(){
     if(!s) return;
-    if(ctx && !s.ctx.sid && !s.taps.length){ toast('Choisissez d’abord le nageur', true); pickSwimmer(); return; }
+    if(ctx && !s.ctx.sid && !s.taps.length){ toast('Choisissez d’abord le nageur', true); pickStudent('sid'); return; }
     const now = Date.now();
     if(now - lastTap < 350) return; // anti double-tap
     lastTap = now;
@@ -597,25 +646,32 @@ const ChronoUI = (function(){
     $('#classesList').innerHTML = classes.map(c=>`<option value="${esc(c)}">`).join('');
   }
 
+  function swim(c){
+    if(ctx && ctx.test) return { sd:s.parcours.n*25, swt:c.total, v: c.total ? s.parcours.n*25/(c.total/1000) : null };
+    return Classe.swimOf(s.parcours, c.lengths.map(l=>l.dur), c.obstacles.map(x=>({li:x.li, type:x.o.type, dist:x.o.dist, depl:x.o.depl, remorque:x.o.remorque, dur:x.dur})), s.timeObstacles);
+  }
   function classResult(){
-    const base = Chrono.toResult(s);
+    const base = Chrono.toResult(s), c = Chrono.compute(s), w = swim(c);
     return { id: Classe.deviceId()+'-'+Date.now().toString(36), ts: base.ts, d: Classe.deviceId(), cid: s.ctx.cid, n: s.ctx.n,
-      sid: s.ctx.sid, pid: s.parcours.id, pname: s.parcours.name, entree: Store.validEntree(s.parcours.entree), nL: s.parcours.n,
+      sid: s.ctx.sid, oid: s.ctx.oid || null, test: !!(ctx && ctx.test),
+      pid: s.parcours.id, pname: s.parcours.name, entree: Store.validEntree(s.parcours.entree), nL: s.parcours.n,
       total: base.total, faults: base.faults, lens: base.lengths, obs: base.obstacles.map(o=>o.dur), pil: s.ctx.pil || null,
-      ob: Array.from({length:s.parcours.n}, (_,i)=>(s.ob[i]||[null,null,null]).slice(0,3)) };
+      sd: w.sd, swt: w.swt,
+      ob: Array.from({length:nP()}, (_,i)=>(s.ob[i]||[null,null,null]).slice(0,3)) };
   }
   async function saveResult(){
     if(s.saved) return true;
     if(ctx){
-      if(!s.ctx.sid){ toast('Choisissez le nageur', true); pickSwimmer(); return false; }
+      if(!s.ctx.sid){ toast('Choisissez le nageur', true); pickStudent('sid'); return false; }
+      if(!s.ctx.oid && !await ask({title:'Sans observateur ?', msg:'Aucun observateur n’est indiqué pour ce passage. Enregistrer quand même ?', ok:'Enregistrer', cancel:'Choisir'})){ pickStudent('oid'); return false; }
       const P = pil();
       if(P){
-        const missing = Array.from({length:s.parcours.n},(_,i)=>i).filter(i=>[0,1,2].some(k=>(s.ob[i]||[])[k]==null));
-        if(missing.length && !await ask({title:'Observation incomplète', msg:`Critères non renseignés pour : ${missing.map(i=>Store.lenLabel(i)).join(', ')}.\nEnregistrer quand même ?`, ok:'Enregistrer', cancel:'Compléter'})) return false;
+        const missing = Array.from({length:nP()},(_,i)=>i).filter(i=>[0,1,2].some(k=>(s.ob[i]||[])[k]==null));
+        if(missing.length && !await ask({title:'Observation incomplète', msg:`Critères non renseignés pour : ${missing.map(pairLabel).join(', ')}.\nEnregistrer quand même ?`, ok:'Enregistrer', cancel:'Compléter'})) return false;
       }
       Classe.addResult(classResult());
       s.saved = true; persist(); render();
-      toast(`Passage de ${s.ctx.disp} enregistré`);
+      toast(`Passage de ${s.ctx.disp} enregistré${s.ctx.odisp?` · observé par ${s.ctx.odisp}`:''}`);
       return true;
     }
     if(!(s.student.nom||'').trim() && !(s.student.prenom||'').trim()){
@@ -638,8 +694,8 @@ const ChronoUI = (function(){
       if(ok && !await saveResult()) return;
     }
     if(ctx){
-      s = newSess(cur, {timeObstacles:s.timeObstacles, ctx:{pil:s.ctx.pil}});
-      persist(); render(); pickSwimmer();
+      s = newSess(cur, {timeObstacles:s.timeObstacles, ctx:{pil:s.ctx.pil, prev:{sid:s.ctx.sid, oid:s.ctx.oid}}});
+      persist(); render(); pickStudent('sid');
     }else{
       s = Chrono.newSession(cur, {timeObstacles:s.timeObstacles, student:{classe:s.student.classe}});
       persist(); fillStudent(); render();
@@ -661,7 +717,7 @@ const ChronoUI = (function(){
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && view==='chrono') lockScreen(); });
 
   enterHooks.chrono = ()=>{ ensureSession(); fillStudent(); requestAnimationFrame(render); lockScreen();
-    if(ctx && !s.ctx.sid && !s.taps.length) setTimeout(pickSwimmer, 250); };
+    if(ctx && !s.ctx.sid && !s.taps.length) setTimeout(()=>pickStudent('sid'), 250); };
   leaveHooks.chrono = ()=>{ if(timer){ clearInterval(timer); timer=null; } try{ wakeLock && wakeLock.release(); }catch(e){} wakeLock=null; document.querySelectorAll('.overlay').forEach(o=>o.remove()); return true; };
   window.addEventListener('resize', ()=>{ if(view==='chrono') render(); });
 

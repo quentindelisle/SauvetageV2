@@ -44,3 +44,11 @@ Au premier lancement, l’appareil choisit son rôle (modifiable ensuite ; code 
 **Élève** : scanner les infos du cours, contenus du pilier, parcours du jour (animation), chronométrer (choix du nageur + observation des 3 critères à chaque longueur), exporter ses résultats en QR (ou fichier).
 
 **QR** (`js/qr.js`, repris de l’appli Biathlon) : JSON compressé (deflate) + base45 (mode alphanumérique), découpé en plusieurs QR de 300 à 400 caractères qui défilent ; lecture caméra par le détecteur natif, ZXing (WebAssembly, `lib/`) puis jsQR ; secours « photo du QR » et fichier. Morceau : `SV:<S|R>:<id>:<i>:<n>:<données>`.
+
+## V6.1
+- Thème clair façon Biathlon (barre bleue, bordures épaisses, grosses tuiles colorées), dessins des piliers.
+- Observation des 3 critères **une fois par aller-retour** ; l’**observateur** est nommé à chaque passage (bouton « On inverse » pour échanger les rôles).
+- **Test S1** (programmation : type de leçon « Test S1 », 25 / 50 / 100 m) : mesure la vitesse de nage de sauveteur, reprise sur les parcours (affichée au chrono, écart en %).
+- **Fil rouge** (comme Biathlon, 4 couleurs, proposition de l’appli + décision de l’enseignant) : nageur (vitesse stable par rapport au test S1, aucun obstacle raté) et observateur (critères renseignés sur les passages observés).
+- Piliers techniques par défaut : alignement, regard et placement de la tête, coulée (+ entrée, virage, immersion, remorquage).
+- Sélecteur de parcours en vignettes (chrono et leçon du jour, recherche, modèles / mes parcours), code enseignant au pavé numérique.

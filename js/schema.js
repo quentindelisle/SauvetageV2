@@ -9,7 +9,7 @@ const POOL = 25;
 
 const THEMES = {
   dark:  { bg:'#0b1a33', lane:'#1565c0', laneAlt:'#1976d2', line:'rgba(0,0,0,.45)', text:'rgba(255,255,255,.92)', sub:'rgba(255,255,255,.6)', tick:'rgba(255,255,255,.25)', hl:'#ffd54f', done:'rgba(0,0,0,.35)' },
-  light: { bg:'#ffffff', lane:'#4f9be8', laneAlt:'#63a8ee', line:'rgba(0,0,0,.45)', text:'#0b1a33', sub:'#4a5568', tick:'rgba(0,0,0,.18)', hl:'#ff6f00', done:'rgba(255,255,255,.55)' },
+  light: { bg:'#EAF6FF', lane:'#2D8CE6', laneAlt:'#4FA3EE', line:'rgba(0,30,70,.55)', text:'#002E6E', sub:'#5B6478', tick:'rgba(0,46,110,.18)', hl:'#F59A1B', done:'rgba(255,255,255,.6)' },
 };
 
 function rr(ctx,x,y,w,h,r){
@@ -68,7 +68,7 @@ function icon(ctx, type, x, y, size, opts={}){
  *  opts.compact     vignette
  */
 function draw(ctx, p, W, H, opts={}){
-  const T = THEMES[opts.theme||'dark'];
+  const T = THEMES[opts.theme||'light'];
   const compact = !!opts.compact;
   const n = p.n;
   ctx.save();
