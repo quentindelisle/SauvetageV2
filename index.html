@@ -108,6 +108,12 @@
             <span class="muted small" id="edLenMeters">100 m</span>
           </div>
         </div>
+        <div class="field">
+          <span class="field-lbl">Entrée dans l'eau</span>
+          <div class="seg seg-text" id="edEntree" role="group" aria-label="Entrée dans l'eau">
+            <button type="button" data-entree="dive">Plongeon</button><button type="button" data-entree="jump">Saut droit</button><button type="button" data-entree="water">Dans l'eau</button>
+          </div>
+        </div>
       </div>
       <div class="card schema-card">
         <canvas class="schema" id="edSchema"></canvas>
@@ -130,9 +136,6 @@
       <button class="btn ghost" id="simReset"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>Recommencer</button>
       <div class="seg" id="simSpeed" role="group" aria-label="Vitesse">
         <button data-speed="1">×1</button><button data-speed="2">×2</button><button data-speed="4">×4</button>
-      </div>
-      <div class="seg seg-text" id="simStart" role="group" aria-label="Entrée dans l'eau" title="Entrée dans l'eau">
-        <button data-start="dive">Plongeon</button><button data-start="jump">Saut droit</button><button data-start="water">Dans l'eau</button>
       </div>
       <div class="sim-status">
         <span id="simStatus">Prêt</span>

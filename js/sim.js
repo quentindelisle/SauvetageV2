@@ -1184,6 +1184,8 @@ function load(parcours){
    .sort((a,b)=>a.dist-b.dist);
  }
  D={nbLongueurs:n, obstacles:obs};
+ startMode = START_MODES.indexOf(parcours.entree)>=0 ? parcours.entree : 'dive';
+ if(cvTop && active) resizeCanvases();
  reset();
 }
 function reset(){

@@ -25,7 +25,7 @@ function steps(p, timeObstacles=true){
   const out=[];
   for(let i=0;i<p.n;i++){
     const L = Store.lenLabel(i);
-    if(i===0) out.push({kind:'start', li:0, label:'Départ', sub:L});
+    if(i===0) out.push({kind:'start', li:0, label:'Départ', sub:L+' · '+Store.ENTREES[Store.validEntree(p.entree)].label});
     if(timeObstacles){
       (p.obstacles[i]||[]).slice().sort((a,b)=>a.dist-b.dist).forEach(o=>{
         const T = Store.TYPES[o.type];

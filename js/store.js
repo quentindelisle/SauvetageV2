@@ -18,6 +18,16 @@ const TYPES = {
 };
 const TYPE_ORDER = ['cerceau','apnee','mannequin','objet','tapis'];
 
+/* ---------- Entrée dans l'eau (paramètre du parcours) ---------- */
+const ENTREES = {
+  dive:  { label:'Plongeon',          short:'Plongeon' },
+  jump:  { label:'Saut droit',        short:'Saut droit' },
+  water: { label:"Départ dans l'eau", short:"Dans l'eau" },
+};
+const ENTREE_ORDER = ['dive','jump','water'];
+const DEFAULT_ENTREE = 'dive';
+function validEntree(e){ return ENTREES[e] ? e : DEFAULT_ENTREE; }
+
 /* ---------- Parcours intégrés (modèles) ---------- */
 const BUILTIN_RAW = [
   /* ----- 100 m (4 longueurs) — difficulté croissante ----- */
@@ -113,6 +123,7 @@ function normalize(input){
     name: String(input.name || 'Sans nom').trim().slice(0,80) || 'Sans nom',
     ts: Number(input.ts) || Date.now(),
     builtin: !!input.builtin,
+    entree: validEntree(src.entree || input.entree),
     n, obstacles
   };
 }
@@ -126,11 +137,11 @@ function toExchange(p){
     if(o.type==='mannequin') r.remorque=o.remorque;
     return r;
   }); });
-  return { format:'sauvetage-ca2-parcours', v:2, id:p.id, ts:p.ts, name:p.name, data:{ nbLongueurs:p.n, obstacles } };
+  return { format:'sauvetage-ca2-parcours', v:2, id:p.id, ts:p.ts, name:p.name, data:{ nbLongueurs:p.n, entree:validEntree(p.entree), obstacles } };
 }
 
 function emptyParcours(n=4){
-  return { id:uid(), name:'', ts:Date.now(), builtin:false, n, obstacles:Array.from({length:n},()=>[]) };
+  return { id:uid(), name:'', ts:Date.now(), builtin:false, entree:DEFAULT_ENTREE, n, obstacles:Array.from({length:n},()=>[]) };
 }
 
 function countObstacles(p){ return p.obstacles.reduce((s,a)=>s+a.length,0); }
@@ -139,7 +150,8 @@ function summary(p){
   const c = {};
   p.obstacles.flat().forEach(o=>{ c[o.type]=(c[o.type]||0)+1; });
   const parts = TYPE_ORDER.filter(t=>c[t]).map(t=>c[t]+' '+TYPES[t].short.toLowerCase()+(c[t]>1 && !/s$/.test(TYPES[t].short)?'s':''));
-  return parts.length ? parts.join(' · ') : 'Aucun obstacle';
+  parts.unshift(ENTREES[validEntree(p.entree)].short);
+  return parts.length>1 ? parts.join(' · ') : parts[0]+' · aucun obstacle';
 }
 
 /** Avertissements pédagogiques/techniques (non bloquants) */
@@ -214,7 +226,7 @@ function chronoSession(){ return read(K.chrono, null); }
 function saveChronoSession(s){ s ? write(K.chrono, s) : localStorage.removeItem(K.chrono); }
 
 /* Réglages */
-const DEFAULT_SETTINGS = { timeObstacles:true, simSpeed:1, simStart:'dive' };
+const DEFAULT_SETTINGS = { timeObstacles:true, simSpeed:1 };
 function settings(){ return Object.assign({}, DEFAULT_SETTINGS, read(K.settings, {})); }
 function setSetting(k,v){ const s=settings(); s[k]=v; write(K.settings, s); }
 
@@ -240,7 +252,7 @@ function setSetting(k,v){ const s=settings(); s[k]=v; write(K.settings, s); }
 })();
 
 return {
-  POOL, MAX_LEN, MAX_OBS_PER_LEN, TYPES, TYPE_ORDER,
+  POOL, MAX_LEN, MAX_OBS_PER_LEN, TYPES, TYPE_ORDER, ENTREES, ENTREE_ORDER, validEntree,
   uid, clone, clamp, lenLabel, lenShort,
   normalize, toExchange, emptyParcours, countObstacles, summary, warnings,
   library, findParcours, saveToLibrary, deleteFromLibrary, nameExists,
