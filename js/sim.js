@@ -818,11 +818,32 @@ function armSide(ctx, S, th, bend, col){
  limb(ctx,[S,e,h],0.095,col); dot(ctx,h[0],h[1],0.055,col);
  return h;
 }
+/* battement de jambes avec flexion du genou :
+   phi = angle de hanche (+ vers le ventre), bend = flexion du genou (toujours ≤ 0 : le pied part vers le dos).
+   Le genou se plie au début de la descente de la cuisse puis se tend d'un coup (fouetté). */
+function kneeKick(k, o){
+ const phi=(o.base||0)+o.amp*Math.sin(k);
+ const f=Math.pow(0.5+0.5*Math.cos(k+0.5), 1.8);   // flexion maximale quand la cuisse amorce la descente
+ return [phi, -((o.b0||0)+o.bf*f)];
+}
+const KICK = {
+ crawl:{amp:0.16, b0:0.06, bf:0.42}, under:{amp:0.15, b0:0.08, bf:0.4}, mat:{amp:0.1, b0:0.2, bf:0.45},
+ carry:{amp:0.22, b0:0.15, bf:0.55}, hold:{base:0.3, amp:0.25, b0:0.55, bf:0.6}, tow:{amp:0.22, b0:0.15, bf:0.6},
+};
+function legAngles(mode, kick){
+ const o = (mode==='under'||mode==='glide'||mode==='dive'||mode==='block') ? KICK.under
+   : (mode==='mat'||mode==='climb') ? KICK.mat : (mode==='carryUp'||mode==='grab') ? KICK.carry
+   : mode==='hold' ? KICK.hold : mode==='tow' ? KICK.tow : KICK.crawl;
+ return [kneeKick(kick, o), kneeKick(kick+Math.PI, o)];
+}
 function legSide(ctx, H, phi, bend, col, q){
  const k=[H[0]-0.43*Math.cos(phi), H[1]+0.43*Math.sin(phi)];
  const p2=phi+bend;
  const f=[k[0]-0.42*Math.cos(p2), k[1]+0.42*Math.sin(p2)];
- limb(ctx,[H,k,f],0.13,col);
+ // cuisse (plus épaisse), jambe, genou articulé
+ limb(ctx,[H,k],0.15,col);
+ limb(ctx,[k,f],0.11,col);
+ dot(ctx,k[0],k[1],0.072,col);
  // pied (q : orientation du pied ; par défaut légèrement fléchi)
  const qa = (q==null) ? p2+0.5 : q;
  limb(ctx,[f,[f[0]-0.12*Math.cos(qa), f[1]+0.12*Math.sin(qa)]],0.08,col);
@@ -860,26 +881,25 @@ function drawBodySide(ctx, mode, stroke, kick, held, pose){
   feet[0]=footAngle(pose, legs[0]); feet[1]=footAngle(pose, legs[1]);
  }else if(under){
   arms.push([-0.06,0.08],[0.04,0.1]);
-  const d=0.16*Math.sin(kick);
-  legs.push([d,0.12],[d+0.05,0.12]);
+  legs.push(...legAngles(mode, kick));
  }else if(mode==='mat' || mode==='climb'){
   const a=0.25+0.5*Math.sin(stroke);
   arms.push([a,0.6],[0.25+0.5*Math.sin(stroke+Math.PI),0.6]);
-  legs.push([0.1*Math.sin(kick),0.35],[0.1*Math.sin(kick+Math.PI),0.35]);
+  legs.push(...legAngles(mode, kick));
  }else if(mode==='carryUp' || mode==='grab'){
   arms.push([1.0,0.5],[0.9+0.4*Math.sin(stroke),0.4]);
-  legs.push([0.22*Math.sin(kick),0.25],[0.22*Math.sin(kick+Math.PI),0.25]);
+  legs.push(...legAngles(mode, kick));
  }else if(mode==='hold'){
   arms.push([-1.25,0.2],[0.8+0.5*Math.sin(stroke),0.5]);
-  legs.push([0.3+0.25*Math.sin(kick),0.5],[0.3+0.25*Math.sin(kick+Math.PI),0.5]);
+  legs.push(...legAngles(mode, kick));
  }else if(mode==='tow'){
   arms.push([0.9,0.7],[1.6+0.5*Math.sin(stroke),0.5]);
-  legs.push([0.22*Math.sin(kick),0.35],[0.22*Math.sin(kick+Math.PI),0.35]);
+  legs.push(...legAngles(mode, kick));
  }else{ // crawl
   const th=stroke%(Math.PI*2);
   const bendOf=(t)=>{ t=((t%(Math.PI*2))+Math.PI*2)%(Math.PI*2); return t>Math.PI ? -0.9*Math.sin(t-Math.PI) : 0.45*Math.sin(t); };
   arms.push([th, bendOf(th)],[th+Math.PI, bendOf(th+Math.PI)]);
-  legs.push([0.2*Math.sin(kick),0.18+0.12*Math.sin(kick+0.8)],[0.2*Math.sin(kick+Math.PI),0.18+0.12*Math.sin(kick+Math.PI+0.8)]);
+  legs.push(...legAngles(mode, kick));
  }
  armSide(ctx,S,arms[1][0],arms[1][1],COL.skinFar);
  legSide(ctx,H,legs[1][0],legs[1][1],COL.skinFar,feet[1]);
@@ -934,13 +954,17 @@ function drawBodyTop(ctx, mode, stroke, kick, held, pose){
  [-1,1].forEach((sg,i)=>{
   if(legX){
    const [kx,fx]=legX[i];
-   limb(ctx,[[-0.12,sg*0.09],[kx,sg*0.11],[fx,sg*0.09]],0.13,COL.skin);
+   limb(ctx,[[-0.12,sg*0.09],[kx,sg*0.11]],0.15,COL.skin); limb(ctx,[[kx,sg*0.11],[fx,sg*0.09]],0.11,COL.skin); dot(ctx,kx,sg*0.11,0.07,COL.skin);
    dot(ctx,fx-0.04*Math.sign(fx-kx||1),sg*0.09,0.06,COL.skin);
    return;
   }
-  const k=Math.sin(kick+(i?Math.PI:0));
-  const fx=-0.98+0.05*k, fy=sg*(0.08+(mode==='tow'||mode==='hold'?0.12*Math.abs(k):0));
-  limb(ctx,[[-0.12,sg*0.09],[(-0.12+fx)/2,sg*0.1],[fx,fy]],0.13,COL.skin);
+  const [phi,bend]=legAngles(mode, kick)[i];
+  const kx=-0.12-0.43*Math.cos(phi), fx=kx-0.42*Math.cos(phi+bend);
+  const spread=(mode==='tow'||mode==='hold') ? 0.12*Math.abs(Math.sin(kick+(i?Math.PI:0))) : 0;
+  const ky=sg*(0.1+spread*0.5), fy=sg*(0.08+spread);
+  limb(ctx,[[-0.12,sg*0.09],[kx,ky]],0.15,COL.skin);
+  limb(ctx,[[kx,ky],[fx,fy]],0.11,COL.skin);
+  dot(ctx,kx,ky,0.07,COL.skin);
   dot(ctx,fx-0.04,fy,0.06,COL.skin);
  });
  // tronc
