@@ -51,7 +51,7 @@ window.APP_CONFIG = {
   author: 'Quentin Delisle',
   color: '#0062C4',
   accent: '#F59A1B',
-  version: '1.0.0',                  // à augmenter à chaque mise en ligne (sw.js : CACHE)
+  version: '1.0.2',                  // à augmenter à chaque mise en ligne (sw.js : CACHE)
 
   /* ---------- Organisation ---------- */
   mode: 'cycle',

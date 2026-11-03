@@ -215,7 +215,7 @@ function swimCalc(c){
 function newCH(n, sid, k, p, keep = {}){
   const x = LP(n), pi = keep.pi !== undefined ? keep.pi : (x.pil[0] || null);
   CH = { n, sid, k, cid:S.id, oid:keep.oid || null, pi: pi && x.pil.includes(pi) ? pi : null, test:x.kind === 'test',
-    s:Chrono.newSession(p, { timeObstacles: keep.to != null ? keep.to : (Store.settings().timeObstacles !== false) }), ob:[null, null, null], saved:false };
+    s:Chrono.newSession(p, { timeObstacles:true })   /* les obstacles sont toujours chronométrés : ça fait partie de la tâche */, ob:[null, null, null], saved:false };
   persistCH();
 }
 function defaultParcours(n, sid){
@@ -274,6 +274,7 @@ function timelineHTML(c){
 }
 function viewChrono(){
   if (!CH || CH.cid !== S.id) { UI.view = 'saisie'; return render(); }
+  if (!CH.s.timeObstacles && !CH.s.taps.length) { CH.s.timeObstacles = true; persistCH(); }
   const n = CH.n, x = LP(n), c = Chrono.compute(CH.s), p = CH.s.parcours, locked = CH.s.taps.length > 0;
   const t = targetOf(CH.sid, fieldById('vit')), pars = parsOf(n);
   setTop('⏱️ ' + nameOf(CH.sid), lessonLabel(n) + ' · passage ' + (CH.k + 1), `<button class="btn small" data-action="svClose">✕ Fermer</button>`);
@@ -286,23 +287,19 @@ function viewChrono(){
         <button class="sv-who obs ${CH.oid ? '' : 'empty'}" data-action="svPickObs"><small>👀 Observateur</small><b>${CH.oid ? esc(nameOf(CH.oid)) : 'Choisir…'}</b><small>Il observe et coche les critères</small></button></div>
       ${x.pil.length ? `<label class="sv-pilsel"><small>Pilier observé</small><select id="sv-pil">${x.pil.map(id => pilier(id)).filter(Boolean).map(P => `<option value="${P.id}" ${CH.pi === P.id ? 'selected' : ''}>${esc(P.n)}</option>`).join('')}<option value="" ${!CH.pi ? 'selected' : ''}>Pas d'observation</option></select></label>` : ''}
     </div>
+    ${!c.finished ? `<div class="card sv-live"><canvas class="sv-schema" id="sv-schema"></canvas></div>` : ''}
     <div class="sv-clock ${!c.started ? 'idle' : c.finished ? 'done' : ''}" id="sv-clock">${Chrono.fmt(c.elapsed)}</div>
     <button class="sv-tap ${c.next ? 'k-' + c.next.kind : ''}" id="sv-tap" ${c.finished ? 'disabled' : ''}><span class="sv-tl">${c.next ? esc(c.next.label) : 'Terminé'}</span><span class="sv-ts">${c.next ? esc(c.next.sub) : 'Temps final ' + Chrono.fmt(c.total)}</span></button>
     <div class="btn-row sv-tools"><span class="stepper"><button class="cbtn" data-action="svFault" data-d="-1" ${CH.s.faults ? '' : 'disabled'}>−</button><button class="btn orange" data-action="svFault" data-d="1">❌ Obstacle raté <b>${CH.s.faults}</b></button></span>
       <button class="btn ghost" data-action="svUndo" ${locked ? '' : 'disabled'}>↶ Annuler le dernier</button><button class="btn ghost" data-action="svReset" ${locked || CH.s.faults ? '' : 'disabled'}>↺ Recommencer</button></div>
-    ${!CH.test ? `<label class="sv-switch"><input type="checkbox" id="sv-tobs" ${CH.s.timeObstacles ? 'checked' : ''} ${locked ? 'disabled' : ''}> Chronométrer aussi les obstacles (début / fin)</label>` : ''}
-    ${c.finished ? finishCard(c) : ''}
-    <p class="muted small center">Télécommande ou clavier : Espace / Entrée / Page suivante = top · Page précédente = annuler · F = obstacle raté</p>
+    ${c.finished ? obsCard() + finishCard(c) : ''}
   </div><div class="sv-col">
-    ${obsCard()}
-    <div class="card"><canvas class="sv-schema" id="sv-schema"></canvas>
-      <div class="sv-kpis"><div><small>Longueurs</small><b>${c.lenTotal ? Chrono.fmt(c.lenTotal) : '—'}</b></div><div><small>Obstacles</small><b>${CH.s.timeObstacles && !CH.test ? (c.obsTotal ? Chrono.fmt(c.obsTotal) : '—') : 'non chrono.'}</b></div><div><small>Nage seule</small><b>${CH.s.timeObstacles && c.lenTotal ? Chrono.fmt(c.swimTotal) : '—'}</b></div></div></div>
-    <div class="card"><ol class="sv-tlist">${timelineHTML(c)}</ol></div>
+    <div class="card"><div class="sv-kpis"><div><small>Longueurs</small><b>${c.lenTotal ? Chrono.fmt(c.lenTotal) : '—'}</b></div><div><small>Obstacles</small><b>${!CH.test ? (c.obsTotal ? Chrono.fmt(c.obsTotal) : '—') : '—'}</b></div><div><small>Nage seule</small><b>${c.lenTotal ? Chrono.fmt(c.swimTotal) : '—'}</b></div></div>
+      <ol class="sv-tlist">${timelineHTML(c)}</ol></div>
   </div></div>`;
   // liaisons
   const tap = $('#sv-tap'); if (tap) tap.addEventListener('pointerdown', e => { e.preventDefault(); doTap(); });
   const ps = $('#sv-pil'); if (ps) ps.onchange = () => { CH.pi = ps.value || null; CH.ob = [null, null, null]; CH.saved = false; persistCH(); rerender(); };
-  const to = $('#sv-tobs'); if (to) to.onchange = () => { if (CH.s.taps.length) return; CH.s.timeObstacles = to.checked; Store.setSetting('timeObstacles', to.checked); persistCH(); rerender(); };
   let done = -1; c.lengths.forEach((l, i) => { if (l.dur != null) done = i; });
   const hl = c.next ? { li:c.next.kind === 'start' ? 0 : c.next.li, obsId:c.next.obsId ?? null } : null;
   requestAnimationFrame(() => { const cv = $('#sv-schema'); if (cv) Schema.render(cv, p, { theme:'light', highlight:hl, doneUpTo:done }); const nw = $('#sv-now'); if (nw) { const ol = nw.parentElement; ol.scrollTop = Math.max(0, nw.offsetTop - ol.offsetTop - 60); } });
@@ -480,6 +477,22 @@ PTABS.svPdj = { n:'Piliers du jour', ico:'📖' };
 PSECT[0][1].splice(PSECT[0][1].indexOf('lecons') + 1, 0, 'parcours', 'piliers');
 PSECT[1][1].splice(1, 0, 'svAnim', 'svPdj');
 PTABS.lecons.n = 'Paramètres du cycle · leçons';
+/* QR d'accès à l'appli (tablettes qui ne l'ont pas encore) : interface enseignant uniquement */
+PTABS.appQR = { n:'QR de l\'appli', ico:'📲' };
+PSECT[1][1].splice(PSECT[1][1].indexOf('qr') + 1, 0, 'appQR');
+function showAppQR(){
+  if (!/^https?:/.test(location.protocol) || !window.qrcode) return modal(`<h2>📲 QR de l'appli</h2><p>Le QR d'accès n'est disponible que lorsque l'appli est ouverte depuis son adresse en ligne (La Forge, GitHub Pages…).</p><div class="btn-row spread"><span></span><button class="btn primary" data-x>Fermer</button></div>`).querySelector('[data-x]').onclick = closeModal;
+  const qr = qrcode(0, 'M'); qr.addData(appURL()); qr.make();
+  const m = modal(`<h2>📲 Installer l'appli sur une tablette</h2>
+    <div class="center"><img src="${qr.createDataURL(10, 16)}" alt="QR d'accès à l'application" style="width:min(70vw,60vh,520px);height:auto;image-rendering:pixelated;border:3px solid var(--line);border-radius:16px;background:#fff"></div>
+    <ol style="font-size:18px;line-height:1.5"><li>Sur la tablette, ouvrir l'appareil photo et viser ce QR.</li><li>Ouvrir le lien, puis <b>Partager → « Sur l'écran d'accueil »</b> (iPad) ou <b>⋮ → « Installer l'application »</b> (Android).</li><li>Lancer l'appli depuis l'écran d'accueil, choisir <b>Tablette élève</b>, puis <b>📷 Recevoir la leçon</b>.</li></ol>
+    <div class="app-url center">${esc(appURL())}</div>
+    <div class="btn-row spread" style="margin-top:12px"><button class="btn" data-l>📲 QR de la leçon →</button><button class="btn primary" data-x>Fermer</button></div>`, { wide:true });
+  m.querySelector('[data-x]').onclick = closeModal;
+  m.querySelector('[data-l]').onclick = () => { closeModal(); go('prof', { profTab:'qr' }); };
+}
+const _profQR = profQR;
+profQR = function(){ return `<div class="card center"><b>Une tablette n'a pas encore l'appli ?</b> <button class="btn orange" data-action="tab" data-tab="appQR">📲 QR de l'appli</button></div>` + _profQR(); };
 
 function profParcours(){
   const L = Store.library(), n = curLesson(), inL = id => LP(n).par.some(p => p.id === id);
@@ -565,7 +578,7 @@ render = function(){
 const _tab = ACT.tab;
 const libP = id => Store.findParcours(id);
 Object.assign(ACT, {
-  tab: d => { UI.svBack = null; if (d.tab === 'svAnim') { UI.svAnimList = null; UI.svAnimI = 0; return go('anim'); } if (d.tab === 'svPdj') return go('pdj'); return _tab(d); },
+  tab: d => { UI.svBack = null; if (d.tab === 'appQR') return isProf() && UI.profUnlocked ? showAppQR() : null; if (d.tab === 'svAnim') { UI.svAnimList = null; UI.svAnimI = 0; return go('anim'); } if (d.tab === 'svPdj') return go('pdj'); return _tab(d); },
   go: d => { if (d.view === 'anim') { UI.svAnimList = null; UI.svAnimI = 0; } go(d.view); },
   svManual: () => { UI.svManual = !UI.svManual; rerender(); },
   svChrono: d => openChrono(d.sid, +d.k),
