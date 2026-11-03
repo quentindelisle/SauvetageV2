@@ -1,0 +1,16 @@
+# Publication de l'appli N'EPS sur les Pages de La Forge des communs numériques éducatifs (GitLab)
+# À chaque envoi (push) sur la branche principale, le site est recopié dans « public » et mis en ligne.
+image: alpine:latest
+
+pages:
+  stage: deploy
+  script:
+    - mkdir .public
+    - cp -r ./* .public
+    - rm -rf public
+    - mv .public public
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

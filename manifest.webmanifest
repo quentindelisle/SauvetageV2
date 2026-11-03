@@ -1,17 +1,17 @@
 {
-  "name": "Parcours et Chronométrie en Sauvetage Aquatique CA2",
+  "name": "Sauvetage CA2 – N'EPS numérique",
   "short_name": "Sauvetage CA2",
-  "description": "Créer, visualiser et chronométrer des parcours de sauvetage aquatique — N'EPS numérique, Académie de Nantes.",
+  "description": "CA2 · Parcours de sauvetage aquatique (bassin 25 m) – Quentin Delisle",
   "lang": "fr",
-  "start_url": "./index.html#/home",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#F2F9FE",
   "theme_color": "#0062C4",
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
     { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

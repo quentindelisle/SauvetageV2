@@ -176,7 +176,8 @@ function warnings(p){
 }
 
 /* ---------- Stockage local ---------- */
-const K = { lib:'sca2.library', cur:'sca2.current', chrono:'sca2.chrono', results:'sca2.results', settings:'sca2.settings' };
+/* V2 (socle N'EPS) : clés séparées de la V6 ; la bibliothèque de la V6 (sca2.library) est recopiée une fois si elle existe sur l'appareil */
+const K = { lib:'sauv2.library', cur:'sauv2.current', chrono:'sauv2.chrono', results:'sauv2.results', settings:'sauv2.settings' };
 function read(key, fallback){ try{ const r=localStorage.getItem(key); return r ? JSON.parse(r) : fallback; }catch(e){ return fallback; } }
 function write(key, val){ try{ localStorage.setItem(key, JSON.stringify(val)); return true; }catch(e){ return false; } }
 
@@ -233,7 +234,12 @@ function setSetting(k,v){ const s=settings(); s[k]=v; write(K.settings, s); }
 /* ---------- Migration depuis la V4c ---------- */
 (function migrate(){
   try{
-    if(localStorage.getItem('sca2.migrated')) return;
+    if(!localStorage.getItem('sauv2.fromV6')){
+      const v6 = read('sca2.library', null);
+      if(Array.isArray(v6) && v6.length){ const lib = read(K.lib, []) || []; v6.forEach(p=>{ try{ if(p && !lib.some(x=>x.id===p.id)) lib.push(p); }catch(e){} }); write(K.lib, lib); }
+      localStorage.setItem('sauv2.fromV6','1');
+    }
+    if(localStorage.getItem('sca2.migrated') || localStorage.getItem('sauv2.migrated')) return;
     // ancienne liste (jamais réellement remplie à cause d'un bug, mais au cas où)
     const oldList = read('pa_parcours_list_v1', null);
     if(Array.isArray(oldList) && oldList.length){
@@ -247,7 +253,7 @@ function setSetting(k,v){ const s=settings(); s[k]=v; write(K.settings, s); }
       const p = normalize({ name:'Parcours récupéré (ancienne version)', data:oldState.data });
       if(countObstacles(p)>0){ setCurrent(p); saveToLibrary(p); }
     }
-    localStorage.setItem('sca2.migrated','1');
+    localStorage.setItem('sauv2.migrated','1');
   }catch(e){}
 })();
 
