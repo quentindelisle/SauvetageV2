@@ -75,6 +75,13 @@ const BUILTIN_RAW = [
     4:[{id:6,type:'apnee',dist:0,depl:12}],
     5:[{id:7,type:'apnee',dist:8,depl:15}],
     6:[{id:8,type:'mannequin',dist:3,remorque:22}]}}},
+  /* ----- Parcours M Rorteau (150 m) ----- */
+  {id:'BMRorteau', ts:1793750400000, name:'Parcours M Rorteau', data:{nbLongueurs:6, obstacles:{1:[],
+    2:[{id:1,type:'mannequin',dist:5,remorque:15}],
+    3:[],
+    4:[{id:2,type:'apnee',dist:0,depl:10},{id:3,type:'apnee',dist:15,depl:10}],
+    5:[],
+    6:[{id:4,type:'cerceau',dist:10}]}}},
   /* ----- Parcours de la V4c ----- */
   {id:'Pmlgbnnkxtmd5gz', ts:1770711077409, name:'LJ Difficulté 1', data:{nbLongueurs:6, obstacles:{1:[],2:[],
     3:[{id:1,type:'cerceau',dist:8},{id:2,type:'cerceau',dist:14},{id:3,type:'cerceau',dist:19}],

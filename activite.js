@@ -51,11 +51,11 @@ window.APP_CONFIG = {
   author: 'Quentin Delisle',
   color: '#0062C4',
   accent: '#F59A1B',
-  version: '1.0.2',                  // à augmenter à chaque mise en ligne (sw.js : CACHE)
+  version: '1.1.0',                  // à augmenter à chaque mise en ligne (sw.js : CACHE)
 
   /* ---------- Organisation ---------- */
   mode: 'cycle',
-  lessons: 8,                        // leçon 1 = Test S1 (réglable dans Paramètres du cycle)
+  lessons: 6,                        // leçon 1 = Test S1 (réglable dans Paramètres du cycle)
   attempts: 2,                       // passages chronométrés par élève et par leçon
   maxGroups: 8,                      // groupes de couleur = tablettes
   sexe: true,

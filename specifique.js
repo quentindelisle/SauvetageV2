@@ -161,7 +161,9 @@ function passCard(n, sid, k){
   return `<div class="sv-pc ${done ? 'done' : ''}"><div class="sv-pc-h"><b>Passage ${k + 1}</b>
       <button class="btn small ${done ? 'ghost' : 'green'}" data-action="svChrono" data-sid="${sid}" data-k="${k}">${done ? '↻ Refaire' : '⏱️ Chronométrer'}</button></div>
     ${par ? `<div class="muted small" style="margin:-2px 0 6px">🗺️ ${esc(par.name)}</div>` : ''}${done ? `<div class="sv-pc-v"><span class="pill">⏱️ ${fmtS(tps)}</span><span class="pill strong" ${t != null && v != null ? gapCell(fV, v, t) : ''}>🏊 ${fmtV(v)}${t != null && v != null ? ' · ' + gapTxt(v, t) : ''}</span>
-      <span class="pill">${rat ? '❌ ' + rat + ' raté' + (rat > 1 ? 's' : '') : '✓ aucun obstacle raté'}</span>${x && x.oi ? `<span class="pill">👀 ${esc(nameOf(x.oi))}</span>` : ''}</div>
+      <span class="pill">${rat ? '❌ ' + rat + ' raté' + (rat > 1 ? 's' : '') : '✓ aucun obstacle raté'}</span>${x && x.oi ? `<span class="pill">👀 ${esc(nameOf(x.oi))}</span>` : ''}
+      ${par && x && Array.isArray(x.dd) ? (() => { const L = []; par.obstacles.forEach(arr => arr.slice().sort((a, b) => a.dist - b.dist).forEach(o => L.push(o)));
+        return L.map((o, i) => isDistObs(o) && x.dd[i] != null ? `<span class="pill ${x.dd[i] < plannedOf(o) ? 'sv-short' : ''}">${distTxt(o, x.dd[i])}</span>` : '').join(''); })() : ''}</div>
       ${P ? `<div class="sv-pc-c"><b>${esc(P.n)} :</b> ${P.cr.map((c, i) => `<span class="sv-cr ${cr[i] === 1 ? 'ok' : cr[i] === 0 ? 'ko' : ''}">${cr[i] === 1 ? '✓' : cr[i] === 0 ? '✗' : '·'} ${esc(c.t)}</span>`).join('')}</div>` : ''}`
       : '<div class="muted">Pas encore fait.</div>'}</div>`;
 }
@@ -207,15 +209,30 @@ function swimOf(p, lens, obsList, timed){
   }
   return { sd:Math.round(d * 10) / 10, swt:t, v:t > 0 ? d / (t / 1000) : null };
 }
+/* Apnée / remorquage : l'observateur indique la distance réellement faite (5, 10, 15, 20, 25 m… jusqu'à la distance prévue) */
+const DIST_STEPS = [5, 10, 15, 20, 25];
+const isDistObs = o => !!o && (o.type === 'apnee' || o.type === 'mannequin');
+const plannedOf = o => o.type === 'apnee' ? (o.depl || 0) : Math.max(0, Math.min(o.remorque || 0, 25 - o.dist));
+const distOpts = o => { const pl = plannedOf(o); return [...DIST_STEPS.filter(d => d < pl), pl].filter(d => d > 0); };
+const stepObs = st => st && st.kind === 'obsEnd' ? (CH.s.parcours.obstacles[st.li] || []).find(o => o.id === st.obsId) || null : null;
+function achievedList(c){   // aligné sur c.obstacles : distance faite (null si l'obstacle n'a pas de distance)
+  return c.obstacles.map(x => { if (!isDistObs(x.o)) return null;
+    const k = c.steps.findIndex(st => st.kind === 'obsEnd' && st.li === x.li && st.obsId === x.o.id), d = CH.dd && CH.dd[k];
+    return d != null ? d : plannedOf(x.o); });
+}
+const obsName = o => Store.TYPES[o.type].short;
+const distTxt = (o, d) => `${o.type === 'apnee' ? '🫧' : '🛟'} ${obsName(o)} ${d === plannedOf(o) ? d + ' m ✓' : d + ' / ' + plannedOf(o) + ' m'}`;
 function swimCalc(c){
   const p = CH.s.parcours;
   if (CH.test) return { sd:p.n * 25, swt:c.total, v:c.total ? p.n * 25 / (c.total / 1000) : null };
-  return swimOf(p, c.lengths.map(l => l.dur), c.obstacles.map(x => ({ li:x.li, type:x.o.type, dist:x.o.dist, depl:x.o.depl, remorque:x.o.remorque, dur:x.dur })), CH.s.timeObstacles);
+  const ach = achievedList(c);
+  return swimOf(p, c.lengths.map(l => l.dur), c.obstacles.map((x, i) => ({ li:x.li, type:x.o.type, dist:x.o.dist,
+    depl: x.o.type === 'apnee' && ach[i] != null ? ach[i] : x.o.depl, remorque: x.o.type === 'mannequin' && ach[i] != null ? ach[i] : x.o.remorque, dur:x.dur })), CH.s.timeObstacles);
 }
 function newCH(n, sid, k, p, keep = {}){
   const x = LP(n), pi = keep.pi !== undefined ? keep.pi : (x.pil[0] || null);
   CH = { n, sid, k, cid:S.id, oid:keep.oid || null, pi: pi && x.pil.includes(pi) ? pi : null, test:x.kind === 'test',
-    s:Chrono.newSession(p, { timeObstacles:true })   /* les obstacles sont toujours chronométrés : ça fait partie de la tâche */, ob:[null, null, null], saved:false };
+    s:Chrono.newSession(p, { timeObstacles:true })   /* les obstacles sont toujours chronométrés : ça fait partie de la tâche */, ob:[null, null, null], dd:{}, saved:false };
   persistCH();
 }
 function defaultParcours(n, sid){
@@ -255,6 +272,7 @@ function finishCard(c){
   const n = CH.n, more = CH.saved ? nextTry(n, CH.sid) : null;
   return `<div class="card sv-finish"><div class="sv-fin-t">Arrivée · ${Chrono.fmt(c.total)}${CH.s.faults ? ` · ${CH.s.faults} obstacle${CH.s.faults > 1 ? 's' : ''} raté${CH.s.faults > 1 ? 's' : ''}` : ''}</div>
     ${sp ? `<div class="sv-fin-s">${sp}</div>` : ''}
+    ${(() => { const a = achievedList(c), L = c.obstacles.map((x, i) => a[i] != null ? `<span class="pill ${a[i] < plannedOf(x.o) ? 'sv-short' : ''}">${distTxt(x.o, a[i])}</span>` : '').join(''); return L ? `<div class="sv-pc-v" style="margin-bottom:10px">${L}</div>` : ''; })()}
     ${CH.saved ? `<p><b>✓ Passage enregistré.</b></p><div class="btn-row">
         ${CH.oid && !isOff(attOf(n, CH.oid)) && attOf(n, CH.oid) !== 3 ? `<button class="btn orange" data-action="svSwap">↔ On inverse : ${esc(nameOf(CH.oid))} nage, ${esc(nameOf(CH.sid))} observe</button>` : ''}
         ${more != null ? `<button class="btn primary" data-action="svMore">▶ Passage ${more + 1} de ${esc(nameOf(CH.sid))}</button>` : ''}
@@ -266,7 +284,7 @@ function timelineHTML(c){
   return c.steps.map((st, k) => {
     const cls = k < t.length ? 'done' : k === t.length ? 'now' : '';
     let dur = '';
-    if (st.kind === 'obsEnd' && k < t.length) { const x = c.obstacles.find(x => x.li === st.li && x.o.id === st.obsId); if (x && x.dur != null) dur = 'durée ' + Chrono.fmt(x.dur); }
+    if (st.kind === 'obsEnd' && k < t.length) { const x = c.obstacles.find(x => x.li === st.li && x.o.id === st.obsId); if (x && x.dur != null) dur = 'durée ' + Chrono.fmt(x.dur); if (x && isDistObs(x.o)) { const d = CH.dd && CH.dd[k] != null ? CH.dd[k] : plannedOf(x.o); dur += (dur ? ' · ' : '') + (d === plannedOf(x.o) ? d + ' m ✓' : d + ' / ' + plannedOf(x.o) + ' m'); } }
     if ((st.kind === 'turn' || st.kind === 'finish') && k < t.length) { const l = c.lengths[st.li]; if (l.dur != null) dur = `${Store.lenLabel(st.li)} : ${Chrono.fmt(l.dur)}`; }
     const isLen = ['start', 'turn', 'finish'].includes(st.kind);
     return `<li class="${cls} ${isLen ? 'len' : ''}" ${cls === 'now' ? 'id="sv-now"' : ''}><i></i><div>${esc(st.label)} <span class="d">· ${esc(st.sub)}</span>${dur ? `<div class="d">${dur}</div>` : ''}</div><span class="t">${k < t.length ? Chrono.fmt(t[k]) : ''}</span></li>`;
@@ -289,7 +307,11 @@ function viewChrono(){
     </div>
     ${!c.finished ? `<div class="card sv-live"><canvas class="sv-schema" id="sv-schema"></canvas></div>` : ''}
     <div class="sv-clock ${!c.started ? 'idle' : c.finished ? 'done' : ''}" id="sv-clock">${Chrono.fmt(c.elapsed)}</div>
-    <button class="sv-tap ${c.next ? 'k-' + c.next.kind : ''}" id="sv-tap" ${c.finished ? 'disabled' : ''}><span class="sv-tl">${c.next ? esc(c.next.label) : 'Terminé'}</span><span class="sv-ts">${c.next ? esc(c.next.sub) : 'Temps final ' + Chrono.fmt(c.total)}</span></button>
+    ${(() => { const o = stepObs(c.next);
+      if (isDistObs(o)) { const pl = plannedOf(o);
+        return `<div class="sv-dist"><div class="sv-dist-h"><b>${esc(c.next.label)}</b> · ${esc(c.next.sub)}<br>Touchez la distance réalisée :</div>
+          <div class="sv-dist-g">${distOpts(o).map(d => `<button class="sv-tap k-obsEnd sv-dbtn ${d === pl ? 'full' : ''}" data-dd="${d}"><span class="sv-tl">${d} m</span><span class="sv-ts">${d === pl ? 'complet ✓' : 'arrêt'}</span></button>`).join('')}</div></div>`; }
+      return `<button class="sv-tap ${c.next ? 'k-' + c.next.kind : ''}" id="sv-tap" ${c.finished ? 'disabled' : ''}><span class="sv-tl">${c.next ? esc(c.next.label) : 'Terminé'}</span><span class="sv-ts">${c.next ? esc(c.next.sub) : 'Temps final ' + Chrono.fmt(c.total)}</span></button>`; })()}
     <div class="btn-row sv-tools"><span class="stepper"><button class="cbtn" data-action="svFault" data-d="-1" ${CH.s.faults ? '' : 'disabled'}>−</button><button class="btn orange" data-action="svFault" data-d="1">❌ Obstacle raté <b>${CH.s.faults}</b></button></span>
       <button class="btn ghost" data-action="svUndo" ${locked ? '' : 'disabled'}>↶ Annuler le dernier</button><button class="btn ghost" data-action="svReset" ${locked || CH.s.faults ? '' : 'disabled'}>↺ Recommencer</button></div>
     ${c.finished ? obsCard() + finishCard(c) : ''}
@@ -299,6 +321,7 @@ function viewChrono(){
   </div></div>`;
   // liaisons
   const tap = $('#sv-tap'); if (tap) tap.addEventListener('pointerdown', e => { e.preventDefault(); doTap(); });
+  $$('.sv-dbtn').forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); doTap(+b.dataset.dd); }));
   const ps = $('#sv-pil'); if (ps) ps.onchange = () => { CH.pi = ps.value || null; CH.ob = [null, null, null]; CH.saved = false; persistCH(); rerender(); };
   let done = -1; c.lengths.forEach((l, i) => { if (l.dur != null) done = i; });
   const hl = c.next ? { li:c.next.kind === 'start' ? 0 : c.next.li, obsId:c.next.obsId ?? null } : null;
@@ -308,10 +331,11 @@ function viewChrono(){
   if (!running && chTimer) { clearInterval(chTimer); chTimer = null; }
   lockScreen();
 }
-function doTap(){
+function doTap(dd){
   if (!CH || UI.view !== 'chrono') return;
   const t = Date.now(); if (t - lastTap < 350) return; lastTap = t;
-  if (Chrono.tap(CH.s, t)) { if (navigator.vibrate) navigator.vibrate(Chrono.compute(CH.s).finished ? [60, 60, 120] : 30); CH.saved = false; persistCH(); rerender(); }
+  const o = stepObs(Chrono.compute(CH.s).next); if (isDistObs(o) && dd == null) dd = plannedOf(o);   // clavier / télécommande : distance complète
+  if (Chrono.tap(CH.s, t)) { if (isDistObs(o)) { CH.dd = CH.dd || {}; CH.dd[CH.s.taps.length - 1] = dd; } if (navigator.vibrate) navigator.vibrate(Chrono.compute(CH.s).finished ? [60, 60, 120] : 30); CH.saved = false; persistCH(); rerender(); }
 }
 async function saveCH(){
   if (!CH || CH.saved) return;
@@ -326,7 +350,7 @@ async function saveCH(){
     const pc = CH.pi ? critPct(CH.ob) : null; put(r, 'pil', pc == null ? null : Math.round(pc));
     r.x = Array.isArray(r.x) ? r.x : []; while (r.x.length < K) r.x.push(null);
     r.x[k] = { p:CH.s.parcours.id, oi:CH.oid || null, pi:CH.pi || null, t:CH.test ? 1 : 0, to:CH.s.timeObstacles ? 1 : 0,
-      l:c.lengths.map(l => ds(l.dur)), o:c.obstacles.map(o => ds(o.dur)), sd:w.sd, st:ds(w.swt) };
+      l:c.lengths.map(l => ds(l.dur)), o:c.obstacles.map(o => ds(o.dur)), dd:achievedList(c), sd:w.sd, st:ds(w.swt) };
   });
   CH.saved = true; persistCH(); toast(`✓ Passage de ${nameOf(sid)} enregistré${CH.oid ? ' · observé par ' + nameOf(CH.oid) : ''}`); rerender();
 }
@@ -594,7 +618,7 @@ Object.assign(ACT, {
     const keep = { oid:CH.oid, pi:CH.pi, to:CH.s.timeObstacles }; newCH(CH.n, CH.sid, CH.k, p, keep); rerender(); },
   svOb: d => { const i = +d.i, v = +d.v; CH.ob[i] = CH.ob[i] === v ? null : v; CH.saved = false; if (navigator.vibrate) navigator.vibrate(15); persistCH(); rerender(); },
   svFault: d => { if (!CH) return; CH.s.faults = Math.max(0, CH.s.faults + (+d.d)); CH.saved = false; persistCH(); rerender(); },
-  svUndo: () => { if (CH && Chrono.undo(CH.s)) { CH.saved = false; persistCH(); rerender(); toast('Dernier top annulé'); } },
+  svUndo: () => { if (CH && Chrono.undo(CH.s)) { if (CH.dd) delete CH.dd[CH.s.taps.length]; CH.saved = false; persistCH(); rerender(); toast('Dernier top annulé'); } },
   svReset: async () => { if (!CH) return; if (CH.s.taps.length && !CH.saved && !(await confirmBox('Recommencer le passage ?', 'Les temps et les observations de ce passage seront effacés.', 'Recommencer', true))) return;
     newCH(CH.n, CH.sid, CH.k, CH.s.parcours, { oid:CH.oid, pi:CH.pi, to:CH.s.timeObstacles }); rerender(); },
   svSave: () => saveCH(),

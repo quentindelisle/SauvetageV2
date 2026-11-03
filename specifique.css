@@ -133,3 +133,11 @@ button.sv-pcard.on{border-color:var(--green);background:var(--green-l)}
 
 @media (max-width:900px){ .sv-chrono,.sv-ed{grid-template-columns:1fr} .sv-tlist{max-height:none} }
 @media (max-width:560px){ .sv-duo{grid-template-columns:1fr} .sv-par{grid-template-columns:100px 1fr} .sv-obsrow{grid-template-columns:1fr 1fr} .sv-tap{min-height:130px} }
+
+/* apnée / remorquage : distance réalisée */
+.sv-dist-h{text-align:center;font-size:18px;margin-bottom:8px}
+.sv-dist-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px}
+.sv-dbtn{min-height:120px;background:#9B7BE0}
+.sv-dbtn.full{background:var(--violet);outline:4px solid #FFD000;outline-offset:-4px}
+.sv-dbtn .sv-tl{font-size:clamp(28px,4.5vw,40px)}
+.pill.sv-short{background:var(--orange-l);color:#8A4B00;font-weight:800}

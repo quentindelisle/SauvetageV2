@@ -1,6 +1,6 @@
 /* Service worker – appli N'EPS (socle N'EPS) – réseau d'abord, cache si hors-ligne.
    À CHAQUE MISE EN LIGNE : changer CACHE (identifiant de l'appli + version), sinon les tablettes gardent l'ancienne version. */
-const CACHE = 'sauvetage-ca2-q7v2-v1.0.2';
+const CACHE = 'sauvetage-ca2-q7v2-v1.1.0';
 const ASSETS = ['./', './index.html', './activite.js', './socle.js', './outils.js', './specifique.js', './styles.css', './specifique.css', './manifest.webmanifest',
   './sauvetage/store.js', './sauvetage/schema.js', './sauvetage/sim.js', './sauvetage/chrono.js',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/favicon-48.png',
